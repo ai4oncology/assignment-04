@@ -1,14 +1,17 @@
-# Assignment 04 - Treatment Design & Optimization
+# Assignment 04 - Longitudinal & Predictive Modeling
 
 **ML4Health 2026**
 
-This assignment covers:
+This assignment covers two consecutive course topics:
 
-- **Treatment Design & Optimization** -- formulate clinical treatment
-  selection as a decision problem and explore data-driven approaches
-  to optimising treatment policies.
+1. **Longitudinal Modeling** -- handling repeated measurements per
+   patient over time (within-subject correlation, time-to-event,
+   survival analysis basics).
+2. **Predictive Modeling** -- risk stratification with proper
+   prediction windows, label leakage avoidance, ROC/AUC and
+   calibration evaluation.
 
-*Tasks will be added once the corresponding lecture is finalised.*
+*Tasks will be added once the corresponding lectures are finalised.*
 
 ---
 
@@ -23,7 +26,8 @@ When ready, the structure will mirror previous assignments
 .
 |-- .github/workflows/{classroom,tests}.yml
 |-- notebook.py                  # marimo walkthrough
-|-- *_exercise.py                # per-task skeletons
+|-- longitudinal_exercise.py     # Section A: longitudinal modeling
+|-- prediction_exercise.py       # Section B: predictive modeling
 |-- data/                        # cohort data
 |-- tests/test_assignment.py     # local + autograder tests
 |-- requirements.txt
