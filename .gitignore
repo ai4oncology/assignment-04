@@ -5,3 +5,7 @@ __pycache__/
 .vscode/
 .idea/
 *.log
+
+# Instructor-side reference solutions (must not ship to students)
+solution.py
+*_solution.py
