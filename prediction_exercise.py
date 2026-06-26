@@ -1,40 +1,41 @@
-"""Section B: predictive modelling -- tiny sequence models on the PBC cohort.
+"""Section A: predictive modelling -- leak-free landmark survival on the PBC cohort.
 
 Paired with the predictive-modelling beat of the assignment narrative:
 
   > The hepatology group has the PBC (primary biliary cirrhosis) cohort:
-  > 312 patients, each followed over years with repeated liver-lab panels.
-  > "Can a sequence model read a patient's lab *trajectory* and flag who
-  > will die? And is a Transformer worth it over a plain RNN here?"
+  > 312 patients followed over years with repeated liver-lab panels.
+  > "From a patient's first couple of years of labs, can we flag who will die
+  > within five years? And is a Transformer worth it over a plain RNN?"
 
-You build two **deliberately tiny** sequence classifiers and compare them
-against a simple, strong baseline:
+The hard part is doing this **without leaking the future**. Each patient is
+described only by visits in the first `landmark_years`, and the label is death
+within `horizon_years`, so no value measured after the prediction window ever
+reaches any model. You then compare three models:
 
-  1. **Logistic regression** on per-patient summary statistics (mean, last
-     value, slope of each lab). It throws away fine temporal shape, but it
-     is the bar any sequence model must clear.
-  2. **A tiny RNN** (one GRU layer, small hidden size). A learned recurrent
-     state summarising the visit sequence.
-  3. **A tiny Transformer** (one encoder layer, small model dim). Self-attention
-     over the visit sequence, mean-pooled.
+  1. **Logistic regression** on per-patient summary statistics (mean, last value,
+     slope of each lab): a strong, cheap baseline.
+  2. **A tiny RNN** (one GRU layer, small hidden size).
+  3. **A tiny Transformer** (one encoder layer, small model dim), mean-pooled.
 
-The point of the exercise is NOT to win a leaderboard. On ~300 patients you
-should find that the RNN and Transformer roughly **tie each other**, and that
-neither reliably **beats the logistic baseline**. Small clinical cohorts reward
-small models and strong baselines; a Transformer's capacity is wasted (and
-overfits) when there are only a few hundred labelled sequences.
+On this honest landmark setup the three are close (AUROC ~0.88-0.92), and with
+only ~55 deaths the differences are within noise. So the lesson is the evaluation
+**discipline** (a fixed prediction window, a future horizon, and dropping patients
+whose outcome is unknown), not a leaderboard. The naive alternative ("did the
+patient ever die?") scores higher but cheats: the last visit sits right before
+death, and follow-up length itself encodes the outcome.
 
 Data
 ----
-`data/pbcseq.csv` (the pbcseq cohort, R `survival` package). Repeated rows per
-`id`, with `day` (days since enrolment) and `status` (0 censored, 1 transplant,
-2 death). We predict **death** (status == 2 ever) from the lab trajectory.
+`data/pbcseq.csv` (pbcseq, R `survival` package). Repeated rows per `id`, with
+`day` (days since enrolment), `futime` (days of follow-up), and `status`
+(0 censored, 1 transplant, 2 death). `load_sequences` turns this into the
+leak-free landmark dataset described below.
 
 What to implement
 -----------------
 Eight auto-graded functions (see the stubs below). Keep the two models tiny:
-the tests cap each at under 3000 parameters, so use small `hidden` / `d_model`
-(the defaults are fine). On this cohort a 393-parameter RNN matches a much
+the tests cap each at under 500 parameters, so use small `hidden` / `d_model`
+(the defaults are fine). On this cohort a 150-parameter RNN matches a much
 larger one, so bigger is not better here.
 
 Run the tests with:
@@ -57,30 +58,36 @@ N_FEATURES = len(LABS)
 # ---------------------------------------------------------------------------
 # Data: variable-length visit sequences -> padded tensor + mask + label
 # ---------------------------------------------------------------------------
-def load_sequences(csv_path, max_len: int = 16):
-    """Build padded per-patient lab sequences and the death label.
+def load_sequences(csv_path, landmark_years: float = 2.0,
+                   horizon_years: float = 5.0, max_len: int = 8):
+    """Build a leakage-free landmark dataset: early visits in, future label out.
+
+    The rule that prevents leakage: a patient is described **only** by the visits
+    in their first `landmark_years`, and the label is whether they die within
+    `horizon_years`. Nothing measured after the landmark is ever used, by any model.
 
     Steps:
-      1. Read `csv_path`; drop rows with any missing value in `LABS`.
-      2. Log-transform the `LOG_LABS` columns (use `np.log` on values clipped
-         to be >= 1e-3), then **z-score every lab** across all visit rows
-         (mean 0, std 1 per column).
-      3. Sort by (`id`, `day`). For each patient, take their first `max_len`
-         visits as a sequence of `LABS` vectors.
-      4. Pad every sequence up to `max_len` time steps with zeros, and build a
-         boolean mask (True where a real visit sits, False on padding).
-      5. Label `y` is 1 if the patient ever has `status == 2` (death), else 0.
+      1. Read `csv_path`; drop rows with any missing value in `LABS`. Compute each
+         visit's time `yr = day / 365.25` and follow-up `futy = futime / 365.25`.
+      2. Log-transform the `LOG_LABS` columns (`np.log` on values clipped >= 1e-3).
+      3. Sort by (`id`, `day`). For each patient, keep the visits with
+         `yr <= landmark_years` (the prediction window). Keep the patient only if:
+            - they are **alive at the landmark** (`futy > landmark_years`), and
+            - their status at the horizon is **known**: either they die by the
+              horizon (`status == 2 and futy <= horizon_years`, label 1) or they
+              are still followed past it (`futy > horizon_years`, label 0).
+         Drop anyone censored in `(landmark_years, horizon_years]` (unknown label).
+      4. **Z-score every lab using only the in-window visits you kept** (so no
+         out-of-window value ever touches the features), then pad each sequence to
+         `max_len` steps with zeros and build a boolean mask.
 
     Returns
     -------
-    X : float32 array, shape (n_patients, max_len, N_FEATURES)
-        Zero-padded standardized lab sequences.
-    mask : bool array, shape (n_patients, max_len)
-        True at real visits, False at padding.
-    y : int array, shape (n_patients,)
-        Death label (1 = died).
+    X : float32 array, shape (n_patients, max_len, N_FEATURES)  -- padded, standardized.
+    mask : bool array, shape (n_patients, max_len)  -- True at real visits.
+    y : int array, shape (n_patients,)  -- 1 if dead within `horizon_years`.
     """
-    # TODO: implement steps 1-5 and return (X, mask, y).
+    # TODO: implement the landmark rule above and return (X, mask, y).
     raise NotImplementedError
 
 
@@ -113,7 +120,7 @@ def count_parameters(model) -> int:
     raise NotImplementedError
 
 
-def make_rnn(input_dim: int, hidden: int = 8):
+def make_rnn(input_dim: int, hidden: int = 4):
     """A tiny GRU classifier.
 
     Return a `torch.nn.Module` whose `forward(x, mask)` takes:
@@ -125,14 +132,14 @@ def make_rnn(input_dim: int, hidden: int = 8):
     then read the hidden state at each patient's **last real time step**
     (use the mask to find it), then a `nn.Linear(hidden, 1)`.
 
-    Keep `hidden` small (default 8, about 400 parameters) so the model stays tiny.
+    Keep `hidden` small (default 4, about 150 parameters) so the model stays tiny.
     """
     # TODO: define and return the module (subclass nn.Module).
     raise NotImplementedError
 
 
-def make_transformer(input_dim: int, d_model: int = 8, nhead: int = 2,
-                     dim_feedforward: int = 16):
+def make_transformer(input_dim: int, d_model: int = 4, nhead: int = 2,
+                     dim_feedforward: int = 8):
     """A tiny Transformer-encoder classifier.
 
     Return a `torch.nn.Module` with the same `forward(x, mask)` contract as
@@ -147,7 +154,7 @@ def make_transformer(input_dim: int, d_model: int = 8, nhead: int = 2,
 
     Pass the padding mask to the encoder via `src_key_padding_mask=~mask`
     (the layer expects True where positions should be ignored). Keep
-    `d_model` small (default 8, about 700 parameters).
+    `d_model` small (default 4, about 200 parameters).
     """
     # TODO: define and return the module (subclass nn.Module).
     raise NotImplementedError
@@ -188,4 +195,44 @@ def evaluate_auroc(y_true, y_proba) -> float:
     Thin wrapper around `sklearn.metrics.roc_auc_score`, returned as a float.
     """
     # TODO: return float(roc_auc_score(y_true, y_proba)).
+    raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
+# Section A (part 2): forecasting the next visit's labs (regression)
+# ---------------------------------------------------------------------------
+def load_forecasting(csv_path, max_len: int = 16):
+    """Build a next-visit *forecasting* dataset (predict values, not an outcome).
+
+    Load / log-transform / z-score the labs as in `load_sequences`, but here each
+    patient yields many examples and the target is the next visit's lab *vector*,
+    not a death label. For each patient with `k` visits and each `j = 1..k-1`: the
+    input is the visits so far (the last `max_len`), and the target is the lab
+    vector at visit `j+1`. Return `groups` (patient id) for GroupKFold.
+
+    Returns
+    -------
+    X : float32 array, shape (n_examples, max_len, N_FEATURES)  -- padded history.
+    mask : bool array, shape (n_examples, max_len).
+    Y : float32 array, shape (n_examples, N_FEATURES)  -- the next visit's labs.
+    groups : array, shape (n_examples,)  -- patient id (use GroupKFold).
+    """
+    # TODO: build (history -> next-visit-labs) examples; return (X, mask, Y, groups).
+    raise NotImplementedError
+
+
+def persistence_forecast(X, mask):
+    """Baseline forecaster: predict the next visit equals the **last observed** visit.
+
+    For each example, return the lab vector at its last real time step (use the
+    mask to find it). Shape (n_examples, N_FEATURES). This "tomorrow = today"
+    baseline is strong because the labs are highly autocorrelated.
+    """
+    # TODO: pick each row's last real time step via the mask and return those vectors.
+    raise NotImplementedError
+
+
+def forecast_mae(Y_true, Y_pred) -> float:
+    """Mean absolute error over all labs and examples (standardized units)."""
+    # TODO: return float(np.mean(np.abs(Y_true - Y_pred))).
     raise NotImplementedError

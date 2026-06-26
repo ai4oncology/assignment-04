@@ -4,16 +4,19 @@ Open with:
 
     marimo edit notebook.py
 
-Two sections, one cohort-of-problems each:
+Part 1 (a time-series demo) plus two graded sections:
 
-  * **Section A -- Sequence models** (predictive): predict death from a
+  * **Part 1 -- Time-series data**: a 1D convolution on raw ECG (MIT-BIH), where
+    waveform shape is the whole signal and a CNN beats a flat baseline. A worked
+    warm-up (uses `data/mitbih_ch0.npz`); nothing to implement.
+  * **Section A -- Sequence models** (predictive): predict survival from a
     patient's lab trajectory on the PBC cohort. You implement the functions in
     `prediction_exercise.py`; the cells run three models on `data/pbcseq.csv`.
   * **Section B -- Tracking** (longitudinal): chain unlabelled per-frame
     detections of moving cells into trajectories. You implement the functions
     in `tracking_exercise.py`; the cells run them on `data/detections.csv`.
 
-Both sections end in pen-and-paper questions whose answers auto-save to
+The graded sections end in pen-and-paper questions whose answers auto-save to
 `submission.json` for the autograder.
 """
 
@@ -56,7 +59,8 @@ def _():
     import matplotlib.pyplot as plt
     from pathlib import Path
 
-    return Path, np, plt
+    GREY = "#9AA0A6"
+    return GREY, Path, np, plt
 
 
 @app.cell
@@ -95,18 +99,686 @@ def _(mo):
     mo.md(r"""
     # Assignment 04 — Longitudinal & Predictive Modeling
 
-    Two short sections on the same theme — **reading signal out of data that
-    changes over time** — but from opposite ends:
+    Three short parts on one theme, **reading signal out of data that changes
+    over time**:
 
-    - **Section A — Sequence models.** Predict an outcome from a patient's
-      lab *trajectory*, and ask whether a Transformer earns its keep over a
-      plain RNN and a logistic baseline. (Implement `prediction_exercise.py`.)
-    - **Section B — Tracking.** Frame-to-frame *data association*: chain
+    - **Part 1 — Time-series data (demo).** A 1D convolution on raw ECG (MIT-BIH),
+      where waveform *shape* is the whole signal and a CNN clearly beats a flat
+      baseline. A worked warm-up; nothing to implement.
+    - **Section A — Sequence models** *(graded)*. Predict survival from a patient's
+      lab *trajectory*, and ask whether a Transformer earns its keep over a plain
+      RNN and a logistic baseline. (Implement `prediction_exercise.py`.)
+    - **Section B — Tracking** *(graded)*. Frame-to-frame *data association*: chain
       unlabelled detections of moving cells into trajectories. (Implement
       `tracking_exercise.py`.)
 
-    Work top to bottom. Each section ends in pen-and-paper questions that
+    Work top to bottom. The graded sections end in pen-and-paper questions that
     auto-save to `submission.json` (read by the autograder).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ---
+    # Part 1 (time-series data) — MIT-BIH: where waveform shape is the whole signal
+
+    The **MIT-BIH Arrhythmia Database** (Moody & Mark, 2001) contains 48 half-hour ECG
+    recordings sampled at **360 Hz**, with every heartbeat annotated by two independent
+    cardiologists. Total: ≈ **110 000 labelled beats** across 48 patients.
+
+    **Task:** classify each beat as **Normal (N)** or **Premature Ventricular Contraction
+    (V / PVC)**. A PVC produces a characteristically wide, bizarre QRS complex —
+    a *local waveform shape* that varies beat to beat, invisible to a mean or standard
+    deviation, and exactly what a 1D convolution detects.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Medical excursus: the heart's electrical system and what a PVC is
+
+    An **ECG** records the heart's electrical activity from skin electrodes. Each beat
+    produces a stereotyped waveform:
+
+    - **P wave** — atria contract; the SA node fires
+    - **QRS complex** — ventricles contract; the main pump stroke
+    - **T wave** — ventricles reset for the next beat
+
+    In a healthy heart the impulse always follows the same fast-conducting pathway
+    (SA node → AV node → Bundle of His → Purkinje fibres → muscle), so the QRS is
+    **narrow** (< 120 ms) and looks identical beat to beat.
+
+    A **PVC** is an ectopic beat: the impulse originates in the ventricular muscle itself,
+    bypassing the fast pathway. The wave spreads slowly, cell to cell, producing a
+    **wide (> 120 ms), morphologically bizarre QRS** — often inverted and asymmetric.
+    PVCs are common in healthy adults but can indicate structural heart disease and, in
+    a vulnerable myocardium, can trigger ventricular fibrillation.
+
+    **The key point:** normal vs PVC is a *waveform shape* distinction — exactly the
+    thing a 1D convolutional kernel is built to detect.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(BLUE, GREY, RED, np, plt):
+    from matplotlib.patches import FancyBboxPatch as _FancyBboxPatch, FancyArrowPatch as _FancyArrowPatch
+
+    _YEL = "#FFE863"
+    fig_exc, (ax_path, ax_wave) = plt.subplots(1, 2, figsize=(11, 4.8))
+
+    # left: conduction pathway
+    ax_path.set_xlim(0, 5)
+    ax_path.set_ylim(0, 6)
+    ax_path.axis("off")
+    _steps = [
+        ("SA node fires\n(right atrium)", GREY),
+        ("AV node  (gate + delay)", GREY),
+        ("Bundle of His\n+ branch blocks", BLUE),
+        ("Purkinje fibres → fast spread", BLUE),
+        ("Ventricles contract → narrow QRS", BLUE),
+    ]
+    _ys = [5.1, 4.1, 3.1, 2.1, 1.1]
+    _cx = 2.5
+    for (_txt, _fc), _y in zip(_steps, _ys):
+        ax_path.add_patch(
+            _FancyBboxPatch(
+                (_cx - 2.0, _y - 0.33),
+                4.0,
+                0.65,
+                boxstyle="round,pad=0.06",
+                facecolor=_fc,
+                edgecolor="none",
+                alpha=0.85,
+                zorder=3,
+            )
+        )
+        ax_path.text(
+            _cx,
+            _y,
+            _txt,
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=8.5,
+            fontweight="bold",
+            zorder=4,
+        )
+    for _y0, _y1 in zip(_ys[:-1], _ys[1:]):
+        ax_path.add_patch(
+            _FancyArrowPatch(
+                (_cx, _y0 - 0.33),
+                (_cx, _y1 + 0.33),
+                arrowstyle="-|>",
+                mutation_scale=13,
+                color="#555",
+                lw=1.5,
+                zorder=2,
+            )
+        )
+    ax_path.add_patch(
+        _FancyBboxPatch(
+            (0.1, 2.27),
+            1.6,
+            0.7,
+            boxstyle="round,pad=0.06",
+            facecolor=RED,
+            edgecolor="none",
+            alpha=0.9,
+            zorder=5,
+        )
+    )
+    ax_path.text(
+        0.9,
+        2.62,
+        "PVC:\nectopic focus",
+        ha="center",
+        va="center",
+        color="white",
+        fontsize=7.5,
+        fontweight="bold",
+        zorder=6,
+    )
+    ax_path.add_patch(
+        _FancyArrowPatch(
+            (1.7, 2.62),
+            (_cx - 1.6, 2.62),
+            arrowstyle="-|>",
+            mutation_scale=11,
+            color=RED,
+            lw=1.8,
+            connectionstyle="arc3,rad=0.3",
+            zorder=5,
+        )
+    )
+    ax_path.text(
+        _cx,
+        0.45,
+        "bypasses fast pathway → wide QRS",
+        ha="center",
+        color=RED,
+        fontsize=8.5,
+        fontstyle="italic",
+    )
+    ax_path.set_title("Normal cardiac conduction\n(red = PVC ectopic origin)", fontsize=10)
+    ax_path.text(
+        0.0,
+        1.0,
+        " MEDICAL EXCURSUS ",
+        transform=ax_path.transAxes,
+        fontsize=8.5,
+        fontweight="bold",
+        color="black",
+        va="bottom",
+        ha="left",
+        bbox=dict(boxstyle="square,pad=0.25", facecolor=_YEL, edgecolor="none"),
+        zorder=8,
+    )
+
+    # right: schematic waveforms
+    _t = np.linspace(0, 1, 300)
+
+
+    def _g(t, mu, sig, a):
+        return a * np.exp(-0.5 * ((t - mu) / sig) ** 2)
+
+
+    _normal = (
+        _g(_t, 0.20, 0.030, 0.30)
+        + _g(_t, 0.50, 0.020, 1.00)
+        - _g(_t, 0.52, 0.015, 0.60)
+        + _g(_t, 0.54, 0.020, 0.90)
+        + _g(_t, 0.72, 0.050, 0.35)
+    )
+    _pvc = (
+        _g(_t, 0.45, 0.060, -0.50)
+        + _g(_t, 0.50, 0.055, 1.40)
+        + _g(_t, 0.58, 0.040, -0.80)
+        - _g(_t, 0.73, 0.060, 0.40)
+    )
+    ax_wave.plot(_t, _normal, color=BLUE, lw=2.2, label="Normal beat")
+    ax_wave.plot(_t, _pvc, color=RED, lw=2.2, label="PVC beat", ls="--")
+    ax_wave.axvspan(0.46, 0.58, alpha=0.10, color=BLUE, label="Normal QRS")
+    ax_wave.axvspan(0.40, 0.62, alpha=0.10, color=RED, label="PVC QRS (wider)")
+    ax_wave.set_xlabel("time (normalised)")
+    ax_wave.set_ylabel("amplitude (a.u.)")
+    ax_wave.set_title("Schematic ECG: narrow normal QRS vs wide PVC QRS", fontsize=10)
+    ax_wave.legend(fontsize=8, frameon=False, loc="upper left")
+    ax_wave.axhline(0, color="k", lw=0.5, alpha=0.3)
+
+    fig_exc.tight_layout()
+    fig_exc
+    return
+
+
+@app.cell
+def _(Path, mo, np):
+    BEAT_BEFORE = 90  # samples before the R-peak
+    BEAT_AFTER = 110  # samples after (200 total ≈ 0.55 s at 360 Hz)
+    BEAT_LEN = BEAT_BEFORE + BEAT_AFTER
+    MITBIH_FS = 360
+
+    # Compact channel-0 store of the MIT-BIH database (29 MB, lossless for channel 0).
+    # Bundled in this assignment under data/; provenance in data/README_mitbih.md.
+    _dir = Path(__file__).with_name("data")
+    _npz_path = next(
+        (p for p in (_dir / "mitbih_ch0.npz", Path("mitbih_ch0.npz")) if p.exists()), None
+    )
+
+    MITBIH_OK = _npz_path is not None
+    beats_N, beats_V = [], []
+    X_ecg = y_ecg = mitbih_record = None
+    _note = None
+
+    if not MITBIH_OK:
+        _note = mo.md(
+            "> ⚠️ **MIT-BIH data not found.** This demo needs `data/mitbih_ch0.npz` "
+            "(≈ 29 MB); see `data/README_mitbih.md`. The cells below stay inert until "
+            "the file is present."
+        )
+    else:
+        _Z = np.load(_npz_path)
+        _records = sorted({k[:-4] for k in _Z.files if k.endswith("_sig")})
+
+        def mitbih_record(rid):
+            """One record: channel-0 signal (float32 ADC units), annotation samples, symbols."""
+            return (_Z[f"{rid}_sig"].astype(np.float32), _Z[f"{rid}_ann"], _Z[f"{rid}_sym"])
+
+        for _rid in _records:
+            _sig, _samp, _syms = mitbih_record(_rid)
+            for _pos, _sym in zip(_samp, _syms):
+                if _sym not in ("N", "V"):
+                    continue
+                _lo, _hi = _pos - BEAT_BEFORE, _pos + BEAT_AFTER
+                if _lo < 0 or _hi > len(_sig):
+                    continue
+                _w = _sig[_lo:_hi]
+                _w = (_w - _w.mean()) / (_w.std() + 1e-6)
+                (beats_N if _sym == "N" else beats_V).append(_w)
+
+        _rng_mb = np.random.default_rng(0)
+        _n_keep = min(len(beats_N), 4 * len(beats_V))
+        beats_N = [beats_N[i] for i in _rng_mb.choice(len(beats_N), _n_keep, replace=False)]
+
+        X_ecg = np.array(beats_N + beats_V, dtype=np.float32)[:, None, :]
+        y_ecg = np.array([0] * len(beats_N) + [1] * len(beats_V), dtype=int)
+
+        print(
+            f"MIT-BIH (channel-0 npz): {len(_records)} records  |  "
+            f"Normal: {len(beats_N)}  PVC: {len(beats_V)}  "
+            f"Total beats: {len(y_ecg)}"
+        )
+
+    _note if _note is not None else None
+    return (
+        BEAT_BEFORE,
+        BEAT_LEN,
+        MITBIH_FS,
+        MITBIH_OK,
+        X_ecg,
+        beats_N,
+        beats_V,
+        mitbih_record,
+        y_ecg,
+    )
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### What the raw ECG looks like
+
+    Record 119 (a patient with frequent uniform PVCs): 20 seconds of lead II.
+    Blue ticks mark normal beats; red stars mark PVCs. The PVC arrives early (premature),
+    with a visibly wider and taller spike. The bottom panel zooms into a single N → PVC → N
+    triplet.
+    """)
+    return
+
+
+@app.cell
+def _(BLUE, GREY, MITBIH_FS, MITBIH_OK, RED, mitbih_record, mo, np, plt):
+    if not MITBIH_OK:
+        out_raw = mo.md("*(MIT-BIH data not bundled — raw-ECG panel skipped.)*")
+    else:
+        _raw119, _samp119, _s119 = mitbih_record("119")
+        _sig119 = _raw119 / 200.0
+        _fs = MITBIH_FS
+
+        _pvc_pos = [s for s, sym in zip(_samp119, _s119) if sym == "V"]
+        _anchor = _pvc_pos[3]
+        _lo = max(0, _anchor - 10 * _fs)
+        _hi = min(len(_sig119), _anchor + 10 * _fs)
+        _t_seg = np.arange(_hi - _lo) / _fs
+        _ann_in = [
+            (s - _lo, sym)
+            for s, sym in zip(_samp119, _s119)
+            if _lo <= s < _hi and sym in ("N", "V")
+        ]
+
+        _nv = [(s, sym) for s, sym in zip(_samp119, _s119) if sym in ("N", "V")]
+        _triplet = next(
+            (
+                (_nv[k - 1][0], _nv[k][0], _nv[k + 1][0])
+                for k in range(1, len(_nv) - 1)
+                if _nv[k][1] == "V"
+            ),
+            None,
+        )
+        _zlo = _triplet[0] - int(0.3 * _fs)
+        _zhi = _triplet[2] + int(0.4 * _fs)
+        _t_zoom = np.arange(_zhi - _zlo) / _fs
+
+        fig_raw, (ax_seg, ax_zoom) = plt.subplots(
+            2, 1, figsize=(12, 6), gridspec_kw={"height_ratios": [2, 1.2]}
+        )
+        ax_seg.plot(_t_seg, _sig119[_lo:_hi], color=GREY, lw=0.7, alpha=0.9)
+        for _s, _sym in _ann_in:
+            _c, _mk, _ms = (RED, "*", 12) if _sym == "V" else (BLUE, "|", 8)
+            ax_seg.plot(
+                _s / _fs,
+                _sig119[_lo + _s],
+                marker=_mk,
+                color=_c,
+                ms=_ms,
+                ls="none",
+                zorder=3,
+            )
+        ax_seg.plot([], [], marker="|", color=BLUE, ls="none", ms=9, label="Normal (N)")
+        ax_seg.plot([], [], marker="*", color=RED, ls="none", ms=12, label="PVC (V)")
+        ax_seg.set_ylabel("mV")
+        ax_seg.set_xlabel("seconds")
+        ax_seg.set_title(
+            "MIT-BIH record 119 — 20-second ECG segment, lead II (MLII)", fontsize=10
+        )
+        ax_seg.legend(fontsize=9, frameon=False, loc="upper right")
+
+        ax_zoom.plot(_t_zoom, _sig119[_zlo:_zhi], color=GREY, lw=1.2)
+        for (_bs, _sym), _c, _lbl in zip(
+            [(_triplet[0], "N"), (_triplet[1], "V"), (_triplet[2], "N")],
+            [BLUE, RED, BLUE],
+            ["Normal", "PVC", "Normal"],
+        ):
+            ax_zoom.axvline(
+                (_bs - _zlo) / _fs, color=_c, lw=1.3, ls="--", alpha=0.7, label=_lbl
+            )
+        ax_zoom.set_ylabel("mV")
+        ax_zoom.set_xlabel("seconds")
+        ax_zoom.set_title("Zoom: N → PVC → N  (dashed = R-peak annotation)", fontsize=10)
+        ax_zoom.legend(fontsize=9, frameon=False, loc="upper right")
+        fig_raw.tight_layout(h_pad=1.0)
+        out_raw = fig_raw
+    out_raw
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Extracted beat windows
+
+    Each beat is a 200-sample window (≈ 0.55 s) centred on the annotated R-peak,
+    z-scored. Normal beats (blue) are narrow and symmetric; PVC beats (red) are wide
+    and morphologically diverse. This visual difference is what the CNN will learn.
+    """)
+    return
+
+
+@app.cell
+def _(
+    BEAT_BEFORE,
+    BEAT_LEN,
+    GREY,
+    MITBIH_OK,
+    RED,
+    beats_N,
+    beats_V,
+    mo,
+    np,
+    plt,
+):
+    if not MITBIH_OK:
+        out_beats = mo.md("*(MIT-BIH data not bundled — beat-window panel skipped.)*")
+    else:
+        _n_show = 6
+        _rng = np.random.default_rng(1)
+        _t = np.arange(BEAT_LEN) / 360.0 * 1000  # milliseconds
+
+        fig_beats, axes_b = plt.subplots(
+            2, _n_show, figsize=(13, 4.5), sharey=True, sharex=True
+        )
+        for _col, _i in enumerate(_rng.choice(len(beats_N), _n_show, replace=False)):
+            axes_b[0, _col].plot(_t, beats_N[_i], color=GREY, lw=1.3)
+            axes_b[0, _col].axvline(
+                BEAT_BEFORE / 360 * 1000, color="k", lw=0.6, ls="--", alpha=0.4
+            )
+            axes_b[0, _col].set_title(f"N #{_col + 1}", fontsize=9)
+        for _col, _i in enumerate(_rng.choice(len(beats_V), _n_show, replace=False)):
+            axes_b[1, _col].plot(_t, beats_V[_i], color=RED, lw=1.3)
+            axes_b[1, _col].axvline(
+                BEAT_BEFORE / 360 * 1000, color="k", lw=0.6, ls="--", alpha=0.4
+            )
+            axes_b[1, _col].set_title(f"PVC #{_col + 1}", fontsize=9, color=RED)
+        axes_b[0, 0].set_ylabel("Normal\n(z-scored)", fontsize=9)
+        axes_b[1, 0].set_ylabel("PVC\n(z-scored)", fontsize=9, color=RED)
+        for _ax in axes_b[1]:
+            _ax.set_xlabel("ms", fontsize=8)
+        fig_beats.suptitle(
+            "MIT-BIH beat waveforms: Normal vs PVC  (dashed = R-peak annotation)",
+            fontsize=11,
+        )
+        fig_beats.tight_layout()
+        out_beats = fig_beats
+    out_beats
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Baseline vs 1D CNN on beat classification
+
+    Same setup as MIMIC: a logistic regression baseline vs a 1D CNN.
+
+    **Baseline features**: five generic summary statistics per beat (mean, std, min,
+    max, last value), the same flat baseline as the MIMIC cell. They see all 200 samples
+    but discard the *shape* of the QRS.
+
+    **1D CNN** — reads the raw 200-sample waveform. With ≈ 35 000 labelled beats it
+    has enough data to learn what a PVC looks like.
+    """)
+    return
+
+
+@app.cell
+def _(BLUE, MITBIH_OK, RED, X_ecg, mo, np, plt, y_ecg):
+    if not MITBIH_OK:
+        out_ecg = mo.md("*(MIT-BIH data not bundled — baseline-vs-CNN benchmark skipped.)*")
+    else:
+        import torch as _torch
+        import torch.nn as _nn
+        from sklearn.linear_model import LogisticRegression as _LR
+        from sklearn.preprocessing import StandardScaler as _SS
+        from sklearn.model_selection import StratifiedKFold as _SKF
+        from sklearn.metrics import roc_auc_score as _auc
+
+        def _ecg_features(X):
+            # Same flat baseline as the MIMIC cell: generic summary statistics, not
+            # engineered morphology. Per beat: mean, std, min, max, last value.
+            x = X[:, 0, :]
+            return np.column_stack([x.mean(1), x.std(1), x.min(1), x.max(1), x[:, -1]])
+
+        class _BeatCNN(_nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = _nn.Sequential(
+                    _nn.Conv1d(1, 16, 5, padding=2),
+                    _nn.ReLU(),
+                    _nn.Conv1d(16, 32, 5, padding=2),
+                    _nn.ReLU(),
+                    _nn.AdaptiveMaxPool1d(1),
+                    _nn.Flatten(),  # max-pool keeps the localized QRS shape
+                    _nn.Dropout(0.3),
+                    _nn.Linear(32, 1),
+                )
+
+            def forward(self, x):
+                return self.net(x).squeeze(-1)
+
+        def _fit_beat_cnn(Xtr, ytr, Xte, seed):
+            _torch.manual_seed(seed)
+            dev = "cuda" if _torch.cuda.is_available() else "cpu"
+            m = _BeatCNN().to(dev)
+            pos = float((ytr == 0).sum()) / float((ytr == 1).sum())
+            opt = _torch.optim.Adam(m.parameters(), lr=1e-3, weight_decay=1e-4)
+            lf = _nn.BCEWithLogitsLoss(pos_weight=_torch.tensor([pos], device=dev))
+            Xt = _torch.tensor(Xtr, device=dev)
+            yt = _torch.tensor(ytr, dtype=_torch.float32, device=dev)
+            n, bs = len(Xt), 128
+            m.train()
+            for _ep in range(15):  # minibatch SGD: ~thousands of updates
+                for _i in _torch.randperm(n, device=dev).split(bs):
+                    opt.zero_grad()
+                    lf(m(Xt[_i]), yt[_i]).backward()
+                    opt.step()
+            m.eval()
+            with _torch.no_grad():
+                return _torch.sigmoid(m(_torch.tensor(Xte, device=dev))).cpu().numpy()
+
+        F_ecg = _ecg_features(X_ecg)
+        auc_ecg_lr, auc_ecg_cnn = [], []
+        for _tr, _te in _SKF(5, shuffle=True, random_state=0).split(X_ecg, y_ecg):
+            _sc = _SS().fit(F_ecg[_tr])
+            _lr = _LR(max_iter=1000, C=1.0, class_weight="balanced").fit(
+                _sc.transform(F_ecg[_tr]), y_ecg[_tr]
+            )
+            auc_ecg_lr.append(
+                _auc(y_ecg[_te], _lr.predict_proba(_sc.transform(F_ecg[_te]))[:, 1])
+            )
+            auc_ecg_cnn.append(
+                _auc(y_ecg[_te], _fit_beat_cnn(X_ecg[_tr], y_ecg[_tr], X_ecg[_te], 0))
+            )
+
+        print(
+            f"MIT-BIH  logistic (5 features): {np.mean(auc_ecg_lr):.3f} ± {np.std(auc_ecg_lr):.3f}"
+        )
+        print(
+            f"MIT-BIH  1D-CNN (raw waveform): {np.mean(auc_ecg_cnn):.3f} ± {np.std(auc_ecg_cnn):.3f}"
+        )
+
+        fig_ecg, ax_ecg = plt.subplots(figsize=(5, 4.5))
+        _m = [np.mean(auc_ecg_lr), np.mean(auc_ecg_cnn)]
+        _e = [np.std(auc_ecg_lr), np.std(auc_ecg_cnn)]
+        _bars = ax_ecg.bar(
+            ["logistic\n(5 summary\nstats)", "1D-CNN\n(raw waveform)"],
+            _m,
+            yerr=_e,
+            capsize=6,
+            color=[BLUE, RED],
+            alpha=0.85,
+            error_kw={"elinewidth": 1.8},
+        )
+        ax_ecg.axhline(0.5, color="k", lw=0.9, ls="--", alpha=0.4)
+        ax_ecg.set_ylim(0.5, 1.02)
+        ax_ecg.set_ylabel("AUROC  (5-fold CV)")
+        ax_ecg.set_title(
+            f"MIT-BIH: Normal vs PVC  ({len(y_ecg):,} beats)\nCNN reads the raw QRS shape",
+            fontsize=10,
+        )
+        for _b, _v in zip(_bars, _m):
+            ax_ecg.annotate(
+                f"{_v:.3f}",
+                (_b.get_x() + _b.get_width() / 2, _v + 0.005),
+                ha="center",
+                fontsize=13,
+            )
+        fig_ecg.tight_layout()
+        out_ecg = fig_ecg
+    out_ecg
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ---
+    ## A design choice: which pooling? Know the problem first
+
+    The CNN ends by **pooling** its feature maps over time into one number per channel,
+    then classifying. Which pooling to use is not a default to accept blindly; it should
+    match *where the signal lives*:
+
+    * **Average pooling**: "how strong is this pattern *on average* across the beat?"
+      Suited to a **diffuse** signal (a sustained level or slow trend).
+    * **Max pooling**: "did this pattern fire *anywhere*?" Suited to a **localized event**.
+
+    A PVC is a localized event: one wide, abnormal QRS complex. Averaging dilutes it among
+    ~200 ordinary samples; max pooling keeps the peak. So the clinical picture, not the
+    default, tells us to use **max**. Let us test that the choice actually matters.
+    """)
+    return
+
+
+@app.cell
+def _(GREY, MITBIH_OK, RED, X_ecg, mo, np, plt, y_ecg):
+    if not MITBIH_OK:
+        out_pool = mo.md("*(MIT-BIH data not bundled — pooling comparison skipped.)*")
+    else:
+        import torch as _t
+        import torch.nn as _n
+        from sklearn.model_selection import StratifiedKFold as _SKF2
+        from sklearn.metrics import roc_auc_score as _auc2
+
+        def _cnn(pool):
+            _P = _n.AdaptiveMaxPool1d(1) if pool == "max" else _n.AdaptiveAvgPool1d(1)
+            return _n.Sequential(
+                _n.Conv1d(1, 16, 5, padding=2),
+                _n.ReLU(),
+                _n.Conv1d(16, 32, 5, padding=2),
+                _n.ReLU(),
+                _P,
+                _n.Flatten(),
+                _n.Dropout(0.3),
+                _n.Linear(32, 1),
+            )
+
+        def _fit(Xtr, ytr, Xte, pool):
+            _t.manual_seed(0)
+            _dev = "cuda" if _t.cuda.is_available() else "cpu"
+            _m = _cnn(pool).to(_dev)
+            _pw = float((ytr == 0).sum()) / float((ytr == 1).sum())
+            _opt = _t.optim.Adam(_m.parameters(), lr=1e-3, weight_decay=1e-4)
+            _lf = _n.BCEWithLogitsLoss(pos_weight=_t.tensor([_pw], device=_dev))
+            _X = _t.tensor(Xtr, device=_dev)
+            _y = _t.tensor(ytr, dtype=_t.float32, device=_dev)
+            _m.train()
+            for _ in range(15):
+                for _i in _t.randperm(len(_X), device=_dev).split(128):
+                    _opt.zero_grad()
+                    _lf(_m(_X[_i]).squeeze(-1), _y[_i]).backward()
+                    _opt.step()
+            _m.eval()
+            with _t.no_grad():
+                return _t.sigmoid(_m(_t.tensor(Xte, device=_dev)).squeeze(-1)).cpu().numpy()
+
+        tp_res = {}
+        for _pool in ("avg", "max"):
+            _a = []
+            for _tr, _te in _SKF2(5, shuffle=True, random_state=0).split(X_ecg, y_ecg):
+                _a.append(
+                    _auc2(y_ecg[_te], _fit(X_ecg[_tr], y_ecg[_tr], X_ecg[_te], _pool))
+                )
+            tp_res[_pool] = (float(np.mean(_a)), float(np.std(_a)))
+            print(
+                f"1D-CNN {_pool}-pool (5-fold): {tp_res[_pool][0]:.3f} ± {tp_res[_pool][1]:.3f}"
+            )
+
+        fig_pool, ax_pool = plt.subplots(figsize=(5, 4.5))
+        _mm = [tp_res["avg"][0], tp_res["max"][0]]
+        _ee = [tp_res["avg"][1], tp_res["max"][1]]
+        _bp = ax_pool.bar(
+            ["avg-pool\n(dilutes the spike)", "max-pool\n(keeps the spike)"],
+            _mm,
+            yerr=_ee,
+            capsize=6,
+            color=[GREY, RED],
+            alpha=0.85,
+            error_kw={"elinewidth": 1.8},
+        )
+        ax_pool.axhline(0.5, color="k", lw=0.9, ls="--", alpha=0.4)
+        ax_pool.set_ylim(0.5, 1.02)
+        ax_pool.set_ylabel("AUROC  (5-fold CV)")
+        ax_pool.set_title(
+            "Same CNN, only the pooling differs\n(a PVC is a local spike)", fontsize=10
+        )
+        for _b, _v in zip(_bp, _mm):
+            ax_pool.annotate(
+                f"{_v:.3f}",
+                (_b.get_x() + _b.get_width() / 2, _v + 0.005),
+                ha="center",
+                fontsize=13,
+            )
+        fig_pool.tight_layout()
+        out_pool = fig_pool
+    out_pool
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### The lesson
+
+    Nothing about the network changed; only one design choice, matched to the problem, did,
+    and AUROC moved from ~0.86 to ~0.91. This is the recurring theme in clinical ML:
+    **understand the structure of the signal first, then choose the operator.** The same
+    reasoning runs through this lecture: **causal** vs acausal convolutions (online onset
+    detection), the **sampling grid** (irregular visits), and the **loss** (class imbalance).
+    A default model is a starting point, not the answer.
     """)
     return
 
@@ -114,17 +786,20 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Section A — tiny sequence models on the PBC cohort
+    # Section A — leak-free landmark survival on the PBC cohort
 
     > **The setup.** The hepatology group hands you the **PBC** cohort
-    > (primary biliary cirrhosis): 312 patients, each followed over years with
-    > repeated liver-lab panels, and an outcome (death / transplant / censored).
+    > (primary biliary cirrhosis): 312 patients followed over years with repeated
+    > liver-lab panels and follow-up (`futime` / `status`).
     >
-    > *"Can a sequence model read a patient's lab trajectory and flag who will
-    > die? And is a Transformer worth it over a plain RNN here?"*
+    > *"From a patient's first 2 years of labs, can we flag who dies within 5
+    > years? And is a Transformer worth it over a plain RNN here?"*
 
-    You compare three models on the same task (predict **death** from the visit
-    sequence):
+    The task is a **landmark prediction** that never leaks the future: features
+    come only from visits in the first **2 years**, the label is death within
+    **5 years**, patients must be alive at the 2-year landmark, and anyone whose
+    5-year status is unknown is dropped (so no model ever sees post-window data).
+    That leaves **257 patients, 55 deaths (~21%)**. You compare three models:
 
     1. a **logistic baseline** on summary statistics (mean, last, slope per lab),
     2. a **tiny RNN** (one small GRU layer),
@@ -132,6 +807,248 @@ def _(mo):
 
     Implement the functions in `prediction_exercise.py`, then run the cells below.
     """)
+    return
+
+
+@app.cell
+def _(Path, np, plt):
+    import pandas as pd
+
+    PBC_BLUE, PBC_RED, PBC_GREEN, PBC_GREY = "#344A9A", "#C8323C", "#00A082", "#9AA0A6"
+    plt.rcParams.update({"font.size": 12, "figure.dpi": 120,
+                         "axes.spines.top": False, "axes.spines.right": False})
+
+    _DATA = Path(__file__).with_name("data") / "pbcseq.csv"
+    LABS = ["bili", "albumin", "alk.phos", "ast", "platelet", "protime"]
+    LOGLABS = {"bili", "alk.phos", "ast", "protime"}
+    PRETTY = {"bili": "bilirubin", "albumin": "albumin", "alk.phos": "alk. phos.",
+              "ast": "AST", "platelet": "platelets", "protime": "prothr. time"}
+
+    pbc_df = pd.read_csv(_DATA)
+    pbc_df["yr"] = pbc_df["day"] / 365.25
+    pbc_df["lb"] = np.log(pbc_df["bili"].clip(lower=1e-3))
+    pbc_df["died"] = pbc_df.groupby("id")["status"].transform(lambda s: int((s == 2).any()))
+    nvis = pbc_df.groupby("id").size()
+
+    def lag1_corr(frame, col):
+        """Lag-1 autocorrelation: correlation between a visit and the same patient's next."""
+        y = np.log(frame[col].clip(lower=1e-3)) if col in LOGLABS else frame[col]
+        s = pd.DataFrame({"id": frame["id"], "day": frame["day"], "y": y}).dropna()
+        s = s.sort_values(["id", "day"])
+        pair = pd.DataFrame({"prev": s.groupby("id")["y"].shift(), "cur": s["y"]}).dropna()
+        return np.corrcoef(pair["prev"], pair["cur"])[0, 1]
+
+    print(f"{pbc_df['id'].nunique()} patients, {len(pbc_df)} visits; "
+          f"visits/patient median {int(nvis.median())} (range {nvis.min()}-{nvis.max()})")
+    return (
+        LABS,
+        PBC_BLUE,
+        PBC_GREEN,
+        PBC_GREY,
+        PBC_RED,
+        PRETTY,
+        lag1_corr,
+        nvis,
+        pbc_df,
+    )
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Meet the data: what is PBC?
+
+    **Primary biliary cholangitis (PBC)** is a chronic **autoimmune** liver disease: the immune
+    system attacks and slowly destroys the **small bile ducts** inside the liver. Bile can then
+    no longer drain (**cholestasis**), so **bilirubin** and bile acids build up in the blood,
+    causing **jaundice** and itching, and over years the scarring progresses to **cirrhosis**.
+
+    That mechanism is why **serum bilirubin** climbs along a patient's trajectory and is the
+    central marker tracked in the `pbcseq` cohort.
+    """)
+    return
+
+
+@app.cell
+def _(PBC_BLUE, PBC_GREY, Path, plt):
+    from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+
+    _YEL = "#FFE863"
+    figx, (axx, axy) = plt.subplots(1, 2, figsize=(11.0, 4.8), gridspec_kw={"width_ratios": [1.15, 1]})
+    axx.axis("off")
+    axx.imshow(plt.imread(Path(__file__).with_name("pbc.png")))
+    axx.text(0.0, 1.0, " MEDICAL EXCURSUS ", transform=axx.transAxes,
+             fontsize=8.5, fontweight="bold", color="black", va="bottom", ha="left",
+             bbox=dict(boxstyle="square,pad=0.25", facecolor=_YEL, edgecolor="none"), zorder=8)
+    axy.set_xlim(0, 5); axy.set_ylim(0, 5); axy.axis("off")
+    _steps = [("Small bile ducts destroyed", PBC_GREY), ("Bile cannot drain (cholestasis)", PBC_GREY),
+              ("Bilirubin builds up in the blood", PBC_BLUE),
+              ("Jaundice & itch;\nscarring $\\rightarrow$ cirrhosis over years", PBC_GREY)]
+    _ys = [4.3, 3.25, 2.2, 1.0]; _cx = 2.5
+    for (_txt, _fc), _y in zip(_steps, _ys):
+        _h = 0.62 if "\n" in _txt else 0.5
+        axy.add_patch(FancyBboxPatch((_cx - 2.1, _y - _h / 2), 4.2, _h, boxstyle="round,pad=0.06",
+                      facecolor=_fc, edgecolor="none", alpha=.92 if _fc != PBC_GREY else .8, zorder=3))
+        axy.text(_cx, _y, _txt, ha="center", va="center", color="white",
+                 fontsize=9.5, fontweight=("bold" if _fc == PBC_BLUE else "normal"), zorder=4)
+    for _y0, _y1 in zip(_ys[:-1], _ys[1:]):
+        axy.add_patch(FancyArrowPatch((_cx, _y0 - 0.30), (_cx, _y1 + 0.30), arrowstyle="-|>",
+                      mutation_scale=14, color="#555", lw=1.6, zorder=2))
+    axy.text(_cx, 0.32, "serum bilirubin is the marker tracked in pbcseq", ha="center",
+             va="center", fontsize=8.8, color=PBC_BLUE, fontstyle="italic")
+    axy.set_title("Why bilirubin rises along the trajectory", fontsize=11.5)
+    figx.tight_layout()
+    figx
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## The PBC cohort at a glance
+
+    `pbcseq` is the Mayo Clinic PBC trial: **312 patients**, followed for over a decade, seen at
+    **repeated visits** (every 6-12 months) where a panel of **liver labs** is measured, until
+    **death**, **transplant**, or end of study (**censored**). Each line below is one patient,
+    each dot a visit, the end marker their outcome: many visits per patient, **uneven** spacing
+    and length, and shorter tracks ending in **death**.
+    """)
+    return
+
+
+@app.cell
+def _(PBC_BLUE, PBC_GREY, PBC_RED, pbc_df, plt):
+    sw_order = pbc_df.groupby("id")["yr"].max().sort_values().index
+    sw_ids = sw_order[:: max(1, len(sw_order) // 30)][:30]
+    figc, axc = plt.subplots(figsize=(9.2, 5.2))
+    for _row, _pid in enumerate(sw_ids):
+        _g = pbc_df[pbc_df.id == _pid].sort_values("yr")
+        _t = _g["yr"].values * 12.0
+        axc.plot([0, _t.max()], [_row, _row], color=PBC_GREY, lw=0.8, alpha=.5, zorder=1)
+        axc.scatter(_t, [_row] * len(_t), s=16, color=PBC_BLUE, zorder=2)
+        if (_g["status"] == 2).any():
+            axc.scatter(_t.max(), _row, marker="X", s=55, color=PBC_RED, zorder=3)
+        else:
+            axc.scatter(_t.max(), _row, marker="o", s=34, facecolors="none",
+                        edgecolors=PBC_GREY, linewidths=1.3, zorder=3)
+    axc.set_yticks([]); axc.set_xlabel("months since enrolment")
+    axc.set_ylabel(f"patients (sample of {len(sw_ids)}, sorted by follow-up)")
+    axc.set_title(f"The PBC cohort: {pbc_df['id'].nunique()} patients over ~{pbc_df['yr'].max() * 12:.0f} months")
+    axc.scatter([], [], s=16, color=PBC_BLUE, label="visit (labs measured)")
+    axc.scatter([], [], marker="X", s=55, color=PBC_RED, label="death")
+    axc.scatter([], [], marker="o", s=34, facecolors="none", edgecolors=PBC_GREY, label="censored / transplant")
+    axc.legend(loc="lower right", fontsize=9, frameon=False)
+    figc.tight_layout()
+    figc
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 1. Repeated measures
+
+    Each patient contributes a *sequence* of visits (median 5, up to 16), and bilirubin is
+    tracked along a personal trajectory. Patients who later die (red) tend to ride higher.
+    """)
+    return
+
+
+@app.cell
+def _(PBC_BLUE, PBC_RED, nvis, pbc_df, plt):
+    fig1, (ov1, ov2) = plt.subplots(1, 2, figsize=(10.4, 4.2))
+    ov1.hist(nvis.values, bins=range(1, 18), color=PBC_BLUE, alpha=.85, edgecolor="white")
+    ov1.axvline(nvis.median(), color=PBC_RED, lw=2, ls="--")
+    ov1.annotate(f"median {int(nvis.median())} visits", (nvis.median() + 0.4, ov1.get_ylim()[1] * 0.9),
+                 color=PBC_RED, fontsize=10)
+    ov1.set_xlabel("visits per patient"); ov1.set_ylabel("patients")
+    ov1.set_title(f"{pbc_df['id'].nunique()} patients, {len(pbc_df)} visits: repeated measures")
+    sample = pbc_df[pbc_df.groupby("id")["id"].transform("size") >= 4]
+    for _pid, g in sample.groupby("id"):
+        g = g.sort_values("yr")
+        ov2.plot(g["yr"], g["lb"], "-", color=(PBC_RED if g["died"].iloc[0] else PBC_BLUE), lw=0.7, alpha=.35)
+    ov2.set_xlabel("years since enrolment"); ov2.set_ylabel("log serum bilirubin")
+    ov2.set_title("One line per patient (red = later death)"); ov2.set_xlim(0, 12)
+    fig1.tight_layout()
+    fig1
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 2. Within-patient correlation: the rows are not independent
+
+    The defining property of longitudinal data. **Left:** the gap between two visits of the
+    **same** patient (green) is tiny next to two **random** visits (grey). **Right:** the
+    **autocorrelation**, the plain correlation between a visit and that patient's *next* visit;
+    bilirubin is ~0.9. So treating pooled visits as independent rows, or using a random
+    train/test split, leaks correlated information across the split.
+    """)
+    return
+
+
+@app.cell
+def _(LABS, PBC_BLUE, PBC_GREEN, PBC_GREY, PRETTY, lag1_corr, np, pbc_df, plt):
+    rng = np.random.default_rng(0)
+    sdf = pbc_df.dropna(subset=["lb"]).sort_values(["id", "day"])
+    same = sdf.groupby("id")["lb"].diff().abs().dropna().values
+    vals = sdf["lb"].values; ids = sdf["id"].values
+    perm = rng.permutation(len(vals))
+    cross = np.abs(vals - vals[perm])[ids != ids[perm]]
+    acf = {lab: lag1_corr(pbc_df, lab) for lab in LABS}
+    fig2, (ic1, ic2) = plt.subplots(1, 2, figsize=(10.4, 4.2))
+    bins = np.linspace(0, 4, 30)
+    ic1.hist(same, bins=bins, density=True, color=PBC_GREEN, alpha=.8,
+             label=f"same patient (med {np.median(same):.2f})")
+    ic1.hist(cross, bins=bins, density=True, color=PBC_GREY, alpha=.55,
+             label=f"random pair (med {np.median(cross):.2f})")
+    ic1.set_xlabel(r"$|\Delta$ log-bilirubin$|$ between two visits"); ic1.set_ylabel("density")
+    ic1.set_title("Two visits of the SAME patient are far more alike")
+    ic1.legend(fontsize=9, frameon=False)
+    _order = sorted(acf, key=acf.get)
+    ic2.barh([PRETTY[lab] for lab in _order], [acf[lab] for lab in _order], color=PBC_BLUE, alpha=.85)
+    ic2.set_xlim(0, 1); ic2.set_xlabel("correlation between a visit and the next (same patient)")
+    ic2.set_title("Consecutive visits are strongly correlated")
+    for _i, lab in enumerate(_order):
+        ic2.annotate(f"{acf[lab]:.2f}", (acf[lab] + 0.02, _i), va="center", fontsize=9, color=PBC_BLUE)
+    fig2.tight_layout()
+    fig2
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## 3. Irregular and informative sampling
+
+    Longitudinal data rarely lands on a clean grid. **Left:** the gap $\Delta t$ between
+    consecutive visits varies. **Right:** the *length* of a patient's series is itself
+    informative: patients who die contribute **shorter** sequences (follow-up ends), so the
+    sampling pattern is not independent of the outcome. This is the longitudinal face of
+    "missingness": not values to impute, but a sampling pattern that carries signal.
+    """)
+    return
+
+
+@app.cell
+def _(PBC_BLUE, PBC_RED, np, nvis, pbc_df, plt):
+    dts = pbc_df.sort_values(["id", "day"]).groupby("id")["yr"].diff().dropna().values
+    died = pbc_df.groupby("id")["died"].first()
+    fig3, (sp1, sp2) = plt.subplots(1, 2, figsize=(10.4, 4.2))
+    sp1.hist(dts, bins=np.linspace(0, 3, 40), color=PBC_BLUE, alpha=.85, edgecolor="white")
+    sp1.set_xlabel(r"gap between consecutive visits, $\Delta t$ (years)"); sp1.set_ylabel("visit pairs")
+    sp1.set_title(f"Spacing varies (median {np.median(dts):.2f} yr, not a grid)")
+    parts = [nvis[died == 0].values, nvis[died == 1].values]
+    bp = sp2.boxplot(parts, tick_labels=["survived /\ncensored", "died"], patch_artist=True, widths=.6)
+    for patch, pcol in zip(bp["boxes"], [PBC_BLUE, PBC_RED]):
+        patch.set_facecolor(pcol); patch.set_alpha(.7)
+    for med in bp["medians"]:
+        med.set_color("black")
+    sp2.set_ylabel("visits per patient")
+    sp2.set_title("Series length is itself informative")
+    fig3.tight_layout()
+    fig3
     return
 
 
@@ -144,10 +1061,13 @@ def _(Path):
 
     # Prefer the reference solution if present (instructor side); otherwise fall
     # back to the student stubs. You implement the TODOs in prediction_exercise.py.
+    # reload so edits to the module are picked up without restarting the kernel.
+    import importlib as _importlib
     try:
         import prediction_solution as pr
     except ModuleNotFoundError:
         import prediction_exercise as pr
+    pr = _importlib.reload(pr)
 
     BLUE, RED, GREEN = "#344A9A", "#C8323C", "#00A082"
     DATA = Path(__file__).with_name("data") / "pbcseq.csv"
@@ -266,6 +1186,85 @@ def _(BLUE, GREEN, RED, auc_base, auc_rnn, auc_tfm, plt):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ## Section A, part 2: forecasting the next visit's labs
+
+    A regression flavour: instead of an outcome, predict the **next visit's lab
+    vector** from the history (`load_forecasting`). The baseline is **persistence**
+    (`persistence_forecast`): the next labs equal the last observed ones. Because the
+    labs are slowly varying and highly autocorrelated, persistence is very hard to
+    beat, and a tiny neural forecaster usually does not (it regresses toward the
+    mean). Scored with MAE in standardized units.
+
+    Each patient contributes many (history, next-visit) examples, so they are not
+    independent: cross-validate with **`GroupKFold` keyed on the patient id**, or a
+    patient leaks across train and test (the within-patient correlation issue from
+    the lecture, made operational).
+    """)
+    return
+
+
+@app.cell
+def _(Path, np, pr):
+    from sklearn.model_selection import GroupKFold as _GKF
+    import torch as _torch
+    import torch.nn as _nn
+
+    Xf, maskf, Yf, gf = pr.load_forecasting(
+        str(Path(__file__).with_name("data") / "pbcseq.csv"))
+    print(f"forecast examples={len(Yf)}  patients={len(np.unique(gf))}")
+    print(f"persistence (next = last)  MAE: "
+          f"{pr.forecast_mae(Yf, pr.persistence_forecast(Xf, maskf)):.3f}")
+
+    # pre-given tiny forecasters: each outputs the next lab vector (dim = N_FEATURES)
+    class _RNNForecast(_nn.Module):
+        def __init__(self, d, h=8):
+            super().__init__()
+            self.g = _nn.GRU(d, h, batch_first=True)
+            self.fc = _nn.Linear(h, d)
+
+        def forward(self, x, m):
+            o, _ = self.g(x)
+            i = m.sum(1).clamp(min=1).long() - 1
+            return self.fc(o[_torch.arange(len(x)), i])
+
+    class _TFMForecast(_nn.Module):
+        def __init__(self, d, dm=8, nh=2, ff=16):
+            super().__init__()
+            self.e = _nn.Linear(d, dm)
+            layer = _nn.TransformerEncoderLayer(dm, nh, ff, batch_first=True)
+            self.enc = _nn.TransformerEncoder(layer, 1)
+            self.fc = _nn.Linear(dm, d)
+
+        def forward(self, x, m):
+            h = self.enc(self.e(x), src_key_padding_mask=~m)
+            h = (h * m.unsqueeze(-1)).sum(1) / m.sum(1, keepdim=True).clamp(min=1)
+            return self.fc(h)
+
+    def _cv_forecast(make):
+        err = np.zeros_like(Yf)
+        for _tr, _te in _GKF(5).split(Xf, Yf, gf):
+            _torch.manual_seed(42)
+            _m = make()
+            _opt = _torch.optim.Adam(_m.parameters(), lr=5e-3, weight_decay=1e-4)
+            _lf = _nn.MSELoss()
+            _Xt = _torch.tensor(Xf[_tr]); _Mt = _torch.tensor(maskf[_tr]); _Yt = _torch.tensor(Yf[_tr])
+            _m.train()
+            for _ in range(40):
+                _opt.zero_grad(); _lf(_m(_Xt, _Mt), _Yt).backward(); _opt.step()
+            _m.eval()
+            with _torch.no_grad():
+                err[_te] = np.abs(_m(_torch.tensor(Xf[_te]), _torch.tensor(maskf[_te])).numpy() - Yf[_te])
+        return float(err.mean())
+
+    print(f"tiny RNN forecaster         MAE: {_cv_forecast(lambda: _RNNForecast(Xf.shape[2])):.3f}")
+    print(f"tiny Transformer forecaster MAE: {_cv_forecast(lambda: _TFMForecast(Xf.shape[2])):.3f}")
+    print("(persistence is the one to beat)")
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     ### Section A pen-and-paper questions
 
     Answer the three questions below from what you saw. They auto-save to
@@ -277,52 +1276,53 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo, submission_radio_default):
     _opts = {
-        "The Transformer clearly wins (attention beats recurrence).": "a",
-        "The RNN clearly wins.": "b",
-        "RNN and Transformer roughly tie, and neither clearly beats the "
-        "logistic baseline.": "c",
+        "It runs faster than using the whole record.": "a",
+        "\"Ever died\" leaks the future: the last visit sits right before death "
+        "and follow-up length encodes the outcome, inflating every model.": "b",
+        "The first two years already contain all of each patient's visits.": "c",
     }
-    q_pp_b_winner = mo.ui.radio(
+    q_pp_a_leak = mo.ui.radio(
         options=_opts,
-        label="(A1) How do the three models compare on this cohort?",
-        value=submission_radio_default("Q_PP_B_WINNER", _opts),
+        label="(A1) Why describe a patient by their first 2 years and predict "
+              "death within 5 years, rather than whether they *ever* died?",
+        value=submission_radio_default("Q_PP_A_LEAK", _opts),
     )
-    q_pp_b_winner
-    return (q_pp_b_winner,)
+    q_pp_a_leak
+    return (q_pp_a_leak,)
+
+
+@app.cell(hide_code=True)
+def _(mo, submission_radio_default):
+    _opts = {
+        "They are close (AUROC ~0.88-0.92); with only ~55 events the "
+        "differences are within noise.": "a",
+        "The logistic baseline dominates; the sequence models trail far behind.": "b",
+        "The Transformer wins by a wide, clearly significant margin.": "c",
+    }
+    q_pp_a_compare = mo.ui.radio(
+        options=_opts,
+        label="(A2) On the leak-free landmark task, how do the three models compare?",
+        value=submission_radio_default("Q_PP_A_COMPARE", _opts),
+    )
+    q_pp_a_compare
+    return (q_pp_a_compare,)
 
 
 @app.cell(hide_code=True)
 def _(mo, submission_radio_default):
     _opts = {
         "AUROC collapses to chance: the model is now too small to learn.": "a",
-        "AUROC stays roughly the same: n is too small to use the extra "
-        "capacity, so a 150-parameter RNN matches a 1000-parameter one.": "b",
+        "AUROC stays about the same: with only a few hundred short sequences "
+        "the extra capacity is not the bottleneck.": "b",
         "AUROC improves a lot: smaller is always better.": "c",
     }
-    q_pp_b_size = mo.ui.radio(
+    q_pp_a_size = mo.ui.radio(
         options=_opts,
-        label="(A2) You shrink the RNN from hidden=16 to hidden=4. What happens?",
-        value=submission_radio_default("Q_PP_B_SIZE", _opts),
+        label="(A3) You shrink the RNN from hidden=16 to hidden=4. What happens?",
+        value=submission_radio_default("Q_PP_A_SIZE", _opts),
     )
-    q_pp_b_size
-    return (q_pp_b_size,)
-
-
-@app.cell(hide_code=True)
-def _(mo, submission_radio_default):
-    _opts = {
-        "Transformers cannot model time series.": "a",
-        "With only ~300 labelled sequences, a high-capacity attention model "
-        "overfits, and a strong summary-statistic baseline is hard to beat.": "b",
-        "The labs carry no information about death.": "c",
-    }
-    q_pp_b_why = mo.ui.radio(
-        options=_opts,
-        label="(A3) Why does the Transformer not pull ahead here?",
-        value=submission_radio_default("Q_PP_B_WHY", _opts),
-    )
-    q_pp_b_why
-    return (q_pp_b_why,)
+    q_pp_a_size
+    return (q_pp_a_size,)
 
 
 @app.cell
@@ -366,10 +1366,13 @@ def _(mo):
 def _(Path):
     # Prefer the reference solution if present (instructor side); otherwise fall
     # back to the student stubs. You implement the TODOs in tracking_exercise.py.
+    # reload so edits to the module are picked up without restarting the kernel.
+    import importlib as _importlib
     try:
         import tracking_solution as trk
     except ModuleNotFoundError:
         import tracking_exercise as trk
+    trk = _importlib.reload(trk)
 
     DATA_PATH = Path(__file__).with_name("data") / "detections.csv"
     return DATA_PATH, trk
@@ -884,11 +1887,11 @@ def _(mo, submission_radio_default):
 @app.cell
 def _(
     mo,
+    q_pp_a_compare,
+    q_pp_a_leak,
+    q_pp_a_size,
     q_pp_adjust,
     q_pp_assign,
-    q_pp_b_size,
-    q_pp_b_why,
-    q_pp_b_winner,
     q_pp_cross,
     q_pp_greedy_total,
     q_pp_lines,
@@ -902,9 +1905,9 @@ def _(
 
     _submission = {
         # Section A -- sequence models
-        "Q_PP_B_WINNER": q_pp_b_winner.value,
-        "Q_PP_B_SIZE": q_pp_b_size.value,
-        "Q_PP_B_WHY": q_pp_b_why.value,
+        "Q_PP_A_LEAK": q_pp_a_leak.value,
+        "Q_PP_A_COMPARE": q_pp_a_compare.value,
+        "Q_PP_A_SIZE": q_pp_a_size.value,
         # Section B -- tracking
         "Q_PP_GREEDY_TOTAL": q_pp_greedy_total.value,
         "Q_PP_OPT_TOTAL": q_pp_opt_total.value,

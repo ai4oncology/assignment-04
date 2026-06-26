@@ -1,4 +1,4 @@
-"""Section A: Longitudinal modelling -- multi-object tracking.
+"""Section B: multi-object tracking (the longitudinal-modelling half of the assignment).
 
 Paired with the longitudinal/tracking beat of the assignment narrative (Week-9
 lecture):

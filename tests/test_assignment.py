@@ -127,9 +127,9 @@ def seqs():
 
 def test_load_shapes_and_dtypes(seqs):
     X, mask, y = seqs
-    assert X.shape == (312, 16, pr.N_FEATURES), f"got {X.shape}"
-    assert mask.shape == (312, 16)
-    assert y.shape == (312,)
+    assert X.shape == (257, 8, pr.N_FEATURES), f"got {X.shape}"
+    assert mask.shape == (257, 8)
+    assert y.shape == (257,)
     assert X.dtype == np.float32
     assert mask.dtype == bool
 
@@ -137,14 +137,14 @@ def test_load_shapes_and_dtypes(seqs):
 def test_label_prevalence(seqs):
     _, _, y = seqs
     assert set(np.unique(y)) == {0, 1}
-    assert int(y.sum()) == 140          # 140 / 312 patients die (~45%)
+    assert int(y.sum()) == 55           # 55 / 257 die within the 5-year horizon (~21%)
 
 
 def test_mask_matches_real_visits(seqs):
     X, mask, y = seqs
     # every patient has at least one visit, at most max_len
     counts = mask.sum(axis=1)
-    assert counts.min() >= 1 and counts.max() <= 16
+    assert counts.min() >= 1 and counts.max() <= 8
     # padded positions are exactly zero
     assert np.allclose(X[~mask], 0.0)
     # real positions are not all zero (the labs vary)
@@ -162,7 +162,7 @@ def test_standardized(seqs):
 def test_summary_features(seqs):
     X, mask, _ = seqs
     F = pr.summary_features(X, mask)
-    assert F.shape == (312, 3 * pr.N_FEATURES)
+    assert F.shape == (257, 3 * pr.N_FEATURES)
     assert np.all(np.isfinite(F))
 
 
@@ -172,13 +172,13 @@ def test_summary_features(seqs):
 def test_rnn_is_tiny_module(seqs):
     model = pr.make_rnn(pr.N_FEATURES)
     assert isinstance(model, torch.nn.Module)
-    assert pr.count_parameters(model) < 3000, "keep the RNN tiny"
+    assert pr.count_parameters(model) < 500, "keep the RNN tiny"
 
 
 def test_transformer_is_tiny_module(seqs):
     model = pr.make_transformer(pr.N_FEATURES)
     assert isinstance(model, torch.nn.Module)
-    assert pr.count_parameters(model) < 3000, "keep the Transformer tiny"
+    assert pr.count_parameters(model) < 500, "keep the Transformer tiny"
 
 
 @pytest.mark.parametrize("factory", ["make_rnn", "make_transformer"])
@@ -216,6 +216,38 @@ def test_training_beats_chance(seqs, factory):
     model = pr.train_model(model, X, mask, y, epochs=60, seed=42)
     auroc = pr.evaluate_auroc(y, pr.predict_proba(model, X, mask))
     assert auroc > 0.65, f"{factory} trained AUROC {auroc:.3f} is too close to chance"
+
+
+# ---------------------------------------------------------------------------
+# Section A (part 2) -- next-visit forecasting (regression)
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def forecast():
+    return pr.load_forecasting(DATA_PATH)
+
+
+def test_forecast_shapes(forecast):
+    X, mask, Y, groups = forecast
+    assert X.shape == (1558, 16, pr.N_FEATURES), f"got {X.shape}"
+    assert mask.shape == (1558, 16)
+    assert Y.shape == (1558, pr.N_FEATURES)
+    assert groups.shape == (1558,)
+    assert len(np.unique(groups)) == 283
+
+
+def test_persistence_is_last_visit(forecast):
+    X, mask, Y, _ = forecast
+    pred = pr.persistence_forecast(X, mask)
+    assert pred.shape == Y.shape
+    last = mask.sum(1) - 1                       # each row's last real visit
+    assert np.allclose(pred, X[np.arange(len(X)), last])
+
+
+def test_forecast_mae(forecast):
+    X, mask, Y, _ = forecast
+    assert pr.forecast_mae(Y, Y) == pytest.approx(0.0)
+    mae = pr.forecast_mae(Y, pr.persistence_forecast(X, mask))
+    assert 0.3 < mae < 0.7                       # persistence ~0.46 in standardized units
 
 
 # ---------------------------------------------------------------------------
@@ -280,19 +312,17 @@ def test_q_pp_cross(submission):
     assert _require(submission, "Q_PP_CROSS") == "a"
 
 
-# --- Section A ---
-def test_q_pp_b_winner(submission):
-    # RNN and Transformer tie, and neither clearly beats the logistic baseline.
-    assert _require(submission, "Q_PP_B_WINNER") == "c"
+# --- Section A: sequence models (leak-free landmark task) ---
+def test_q_pp_a_leak(submission):
+    # "ever died" leaks: last visit is near death, follow-up length encodes outcome.
+    assert _require(submission, "Q_PP_A_LEAK") == "b"
 
 
-def test_q_pp_b_size(submission):
-    # Shrinking the RNN leaves AUROC roughly unchanged: n is too small to use
-    # the extra capacity.
-    assert _require(submission, "Q_PP_B_SIZE") == "b"
+def test_q_pp_a_compare(submission):
+    # leak-free, the three models are close (~0.88-0.92), within noise on ~55 events.
+    assert _require(submission, "Q_PP_A_COMPARE") == "a"
 
 
-def test_q_pp_b_why(submission):
-    # Too few labelled sequences: high-capacity attention overfits, strong
-    # baseline is hard to beat.
-    assert _require(submission, "Q_PP_B_WHY") == "b"
+def test_q_pp_a_size(submission):
+    # shrinking the RNN leaves AUROC about the same: capacity is not the bottleneck.
+    assert _require(submission, "Q_PP_A_SIZE") == "b"
