@@ -4,17 +4,23 @@ Open with:
 
     marimo edit notebook.py
 
-Part 1 (a time-series demo) plus two graded sections:
+Two parts, all graded:
 
-  * **Part 1 -- Time-series data**: a 1D convolution on raw ECG (MIT-BIH), where
-    waveform shape is the whole signal and a CNN beats a flat baseline. A worked
-    warm-up (uses `data/mitbih_ch0.npz`); nothing to implement.
-  * **Section A -- Sequence models** (predictive): predict survival from a
-    patient's lab trajectory on the PBC cohort. You implement the functions in
-    `prediction_exercise.py`; the cells run three models on `data/pbcseq.csv`.
-  * **Section B -- Tracking** (longitudinal): chain unlabelled per-frame
-    detections of moving cells into trajectories. You implement the functions
-    in `tracking_exercise.py`; the cells run them on `data/detections.csv`.
+  **Part 1 -- Clinical modeling**
+
+  * **A. Time-series data**: a 1D convolution (and a dilated TCN) on raw ECG
+    (MIT-BIH), where waveform shape is the whole signal. You build the
+    Normal-vs-PVC beat classifier end to end (uses `data/mitbih_ch0.npz`),
+    implementing the functions in `time_series_exercise.py`.
+  * **B. Longitudinal data** (predictive): predict survival from a patient's lab
+    trajectory on the PBC cohort. You implement the functions in
+    `longitudinal_exercise.py`; the cells run three models on `data/pbcseq.csv`.
+
+  **Part 2 -- Tracking**
+
+  Chain unlabelled per-frame detections of moving cells into trajectories. You
+  implement the functions in `tracking_exercise.py`; the cells run them on
+  `data/detections.csv`.
 
 The graded sections end in pen-and-paper questions whose answers auto-save to
 `submission.json` for the autograder.
@@ -97,23 +103,27 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Assignment 04 — Longitudinal & Predictive Modeling
+    # Assignment 04: Longitudinal & Predictive Modeling
 
-    Three short parts on one theme, **reading signal out of data that changes
-    over time**:
+    Two parts on one theme, **reading signal out of data that changes over time**.
 
-    - **Part 1 — Time-series data (demo).** A 1D convolution on raw ECG (MIT-BIH),
-      where waveform *shape* is the whole signal and a CNN clearly beats a flat
-      baseline. A worked warm-up; nothing to implement.
-    - **Section A — Sequence models** *(graded)*. Predict survival from a patient's
-      lab *trajectory*, and ask whether a Transformer earns its keep over a plain
-      RNN and a logistic baseline. (Implement `prediction_exercise.py`.)
-    - **Section B — Tracking** *(graded)*. Frame-to-frame *data association*: chain
-      unlabelled detections of moving cells into trajectories. (Implement
-      `tracking_exercise.py`.)
+    **Part 1: Clinical modeling**
 
-    Work top to bottom. The graded sections end in pen-and-paper questions that
-    auto-save to `submission.json` (read by the autograder).
+    - **A. Time-series data.** A 1D convolution (and a dilated TCN) on raw ECG
+      (MIT-BIH), where waveform *shape* is the whole signal and a CNN beats a flat
+      baseline. Build the beat classifier end to end. (Implement
+      `time_series_exercise.py`.)
+    - **B. Longitudinal data.** Predict survival from a patient's lab *trajectory*,
+      and ask whether a Transformer earns its keep over a plain RNN and a logistic
+      baseline. (Implement `longitudinal_exercise.py`.)
+
+    **Part 2: Tracking**
+
+    Frame-to-frame *data association*: chain unlabelled detections of moving cells
+    into trajectories. (Implement `tracking_exercise.py`.)
+
+    Work top to bottom. Each part ends in pen-and-paper questions that auto-save to
+    `submission.json` (read by the autograder).
     """)
     return
 
@@ -122,14 +132,14 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     ---
-    # Part 1 (time-series data) — MIT-BIH: where waveform shape is the whole signal
+    # Part 1 - A. Time-series data: MIT-BIH, where waveform shape is the whole signal
 
     The **MIT-BIH Arrhythmia Database** (Moody & Mark, 2001) contains 48 half-hour ECG
     recordings sampled at **360 Hz**, with every heartbeat annotated by two independent
     cardiologists. Total: ≈ **110 000 labelled beats** across 48 patients.
 
     **Task:** classify each beat as **Normal (N)** or **Premature Ventricular Contraction
-    (V / PVC)**. A PVC produces a characteristically wide, bizarre QRS complex —
+    (V / PVC)**. A PVC produces a characteristically wide, bizarre QRS complex:
     a *local waveform shape* that varies beat to beat, invisible to a mean or standard
     deviation, and exactly what a 1D convolution detects.
     """)
@@ -144,9 +154,9 @@ def _(mo):
     An **ECG** records the heart's electrical activity from skin electrodes. Each beat
     produces a stereotyped waveform:
 
-    - **P wave** — atria contract; the SA node fires
-    - **QRS complex** — ventricles contract; the main pump stroke
-    - **T wave** — ventricles reset for the next beat
+    - **P wave**: atria contract; the SA node fires
+    - **QRS complex**: ventricles contract; the main pump stroke
+    - **T wave**: ventricles reset for the next beat
 
     In a healthy heart the impulse always follows the same fast-conducting pathway
     (SA node → AV node → Bundle of His → Purkinje fibres → muscle), so the QRS is
@@ -154,11 +164,11 @@ def _(mo):
 
     A **PVC** is an ectopic beat: the impulse originates in the ventricular muscle itself,
     bypassing the fast pathway. The wave spreads slowly, cell to cell, producing a
-    **wide (> 120 ms), morphologically bizarre QRS** — often inverted and asymmetric.
+    **wide (> 120 ms), morphologically bizarre QRS**: often inverted and asymmetric.
     PVCs are common in healthy adults but can indicate structural heart disease and, in
     a vulnerable myocardium, can trigger ventricular fibrillation.
 
-    **The key point:** normal vs PVC is a *waveform shape* distinction — exactly the
+    **The key point:** normal vs PVC is a *waveform shape* distinction: exactly the
     thing a 1D convolutional kernel is built to detect.
     """)
     return
@@ -331,16 +341,21 @@ def _(Path, mo, np):
 
     MITBIH_OK = _npz_path is not None
     beats_N, beats_V = [], []
-    X_ecg = y_ecg = mitbih_record = None
+    X_ecg = y_ecg = rec_ecg = mitbih_record = None
     _note = None
 
     if not MITBIH_OK:
         _note = mo.md(
-            "> ⚠️ **MIT-BIH data not found.** This demo needs `data/mitbih_ch0.npz` "
+            "> ⚠️ **MIT-BIH data not found.** Part 1 needs `data/mitbih_ch0.npz` "
             "(≈ 29 MB); see `data/README_mitbih.md`. The cells below stay inert until "
             "the file is present."
         )
     else:
+        try:
+            import time_series_solution as _ts
+        except ModuleNotFoundError:
+            import time_series_exercise as _ts
+
         _Z = np.load(_npz_path)
         _records = sorted({k[:-4] for k in _Z.files if k.endswith("_sig")})
 
@@ -348,24 +363,27 @@ def _(Path, mo, np):
             """One record: channel-0 signal (float32 ADC units), annotation samples, symbols."""
             return (_Z[f"{rid}_sig"].astype(np.float32), _Z[f"{rid}_ann"], _Z[f"{rid}_sym"])
 
+        _rec_N, _rec_V = [], []  # which record each beat came from (for leak-free splits)
         for _rid in _records:
             _sig, _samp, _syms = mitbih_record(_rid)
-            for _pos, _sym in zip(_samp, _syms):
-                if _sym not in ("N", "V"):
-                    continue
-                _lo, _hi = _pos - BEAT_BEFORE, _pos + BEAT_AFTER
-                if _lo < 0 or _hi > len(_sig):
-                    continue
-                _w = _sig[_lo:_hi]
-                _w = (_w - _w.mean()) / (_w.std() + 1e-6)
-                (beats_N if _sym == "N" else beats_V).append(_w)
+            _nv = np.isin(_syms, ["N", "V"])                 # keep only Normal / PVC beats
+            # your beat extractor: z-scored windows around each R-peak
+            _beats, _kept = _ts.extract_beats(_sig, _samp[_nv], BEAT_BEFORE, BEAT_AFTER)
+            for _w, _sym in zip(_beats, _syms[_nv][_kept]):
+                if _sym == "N":
+                    beats_N.append(_w); _rec_N.append(_rid)
+                else:
+                    beats_V.append(_w); _rec_V.append(_rid)
 
         _rng_mb = np.random.default_rng(0)
         _n_keep = min(len(beats_N), 4 * len(beats_V))
-        beats_N = [beats_N[i] for i in _rng_mb.choice(len(beats_N), _n_keep, replace=False)]
+        _keep = _rng_mb.choice(len(beats_N), _n_keep, replace=False)
+        beats_N = [beats_N[i] for i in _keep]
+        _rec_N = [_rec_N[i] for i in _keep]
 
         X_ecg = np.array(beats_N + beats_V, dtype=np.float32)[:, None, :]
         y_ecg = np.array([0] * len(beats_N) + [1] * len(beats_V), dtype=int)
+        rec_ecg = np.array(_rec_N + _rec_V)  # record id per beat, aligned with X_ecg
 
         print(
             f"MIT-BIH (channel-0 npz): {len(_records)} records  |  "
@@ -383,6 +401,7 @@ def _(Path, mo, np):
         beats_N,
         beats_V,
         mitbih_record,
+        rec_ecg,
         y_ecg,
     )
 
@@ -403,7 +422,7 @@ def _(mo):
 @app.cell
 def _(BLUE, GREY, MITBIH_FS, MITBIH_OK, RED, mitbih_record, mo, np, plt):
     if not MITBIH_OK:
-        out_raw = mo.md("*(MIT-BIH data not bundled — raw-ECG panel skipped.)*")
+        out_raw = mo.md("*(MIT-BIH data not bundled: raw-ECG panel skipped.)*")
     else:
         _raw119, _samp119, _s119 = mitbih_record("119")
         _sig119 = _raw119 / 200.0
@@ -453,9 +472,10 @@ def _(BLUE, GREY, MITBIH_FS, MITBIH_OK, RED, mitbih_record, mo, np, plt):
         ax_seg.set_ylabel("mV")
         ax_seg.set_xlabel("seconds")
         ax_seg.set_title(
-            "MIT-BIH record 119 — 20-second ECG segment, lead II (MLII)", fontsize=10
+            "MIT-BIH record 119: 20-second ECG segment, lead II (MLII)", fontsize=10
         )
-        ax_seg.legend(fontsize=9, frameon=False, loc="upper right")
+        ax_seg.legend(fontsize=8, frameon=False, loc="upper left",
+                      bbox_to_anchor=(1.01, 1.0))
 
         ax_zoom.plot(_t_zoom, _sig119[_zlo:_zhi], color=GREY, lw=1.2)
         for (_bs, _sym), _c, _lbl in zip(
@@ -469,8 +489,9 @@ def _(BLUE, GREY, MITBIH_FS, MITBIH_OK, RED, mitbih_record, mo, np, plt):
         ax_zoom.set_ylabel("mV")
         ax_zoom.set_xlabel("seconds")
         ax_zoom.set_title("Zoom: N → PVC → N  (dashed = R-peak annotation)", fontsize=10)
-        ax_zoom.legend(fontsize=9, frameon=False, loc="upper right")
-        fig_raw.tight_layout(h_pad=1.0)
+        ax_zoom.legend(fontsize=8, frameon=False, loc="upper left",
+                       bbox_to_anchor=(1.01, 1.0))
+        fig_raw.tight_layout(h_pad=1.0, rect=[0, 0, 0.84, 1])
         out_raw = fig_raw
     out_raw
     return
@@ -502,7 +523,7 @@ def _(
     plt,
 ):
     if not MITBIH_OK:
-        out_beats = mo.md("*(MIT-BIH data not bundled — beat-window panel skipped.)*")
+        out_beats = mo.md("*(MIT-BIH data not bundled: beat-window panel skipped.)*")
     else:
         _n_show = 6
         _rng = np.random.default_rng(1)
@@ -528,7 +549,7 @@ def _(
         for _ax in axes_b[1]:
             _ax.set_xlabel("ms", fontsize=8)
         fig_beats.suptitle(
-            "MIT-BIH beat waveforms: Normal vs PVC  (dashed = R-peak annotation)",
+            "MIT-BIH beat waveforms: Normal vs PVC; dashed line = annotation-aligned beat center",
             fontsize=11,
         )
         fig_beats.tight_layout()
@@ -540,78 +561,138 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Baseline vs 1D CNN on beat classification
+    ### Your turn: split these beats without leaking
 
-    Same setup as MIMIC: a logistic regression baseline vs a 1D CNN.
-
-    **Baseline features**: five generic summary statistics per beat (mean, std, min,
-    max, last value), the same flat baseline as the MIMIC cell. They see all 200 samples
-    but discard the *shape* of the QRS.
-
-    **1D CNN** — reads the raw 200-sample waveform. With ≈ 35 000 labelled beats it
-    has enough data to learn what a PVC looks like.
+    Before benchmarking, you need a test set. **Implement `split_by_record` in
+    `time_series_exercise.py`**: given `record_ids` (the MIT-BIH record each beat
+    came from), return a boolean `is_test` mask that holds out *whole records*, so
+    no record has beats on both sides. The check below turns green when it is
+    leak-free; the autograder (`test_split_by_record_is_leak_free`) checks the same
+    thing. Until you implement it, you will see the reminder below.
     """)
     return
 
 
 @app.cell
-def _(BLUE, MITBIH_OK, RED, X_ecg, mo, np, plt, y_ecg):
+def _(np, rec_ecg):
+    # Uses your split from time_series_exercise.py (or the reference
+    # solution if present). Reload so edits are picked up without restarting.
+    import importlib as _il
+
+    try:
+        import time_series_solution as _pr_split
+    except ModuleNotFoundError:
+        import time_series_exercise as _pr_split
+    _pr_split = _il.reload(_pr_split)
+
+    try:
+        _res = _pr_split.split_by_record(rec_ecg) if rec_ecg is not None else None
+        is_test = np.asarray(_res) if _res is not None else None
+        split_todo = False
+    except NotImplementedError:
+        is_test, split_todo = None, True
+    return is_test, split_todo
+
+
+@app.cell(hide_code=True)
+def _(MITBIH_OK, is_test, mo, np, rec_ecg, split_todo, y_ecg):
     if not MITBIH_OK:
-        out_ecg = mo.md("*(MIT-BIH data not bundled — baseline-vs-CNN benchmark skipped.)*")
+        out_split = mo.md("*(MIT-BIH data not bundled: split check skipped.)*")
+    elif split_todo or is_test is None:
+        out_split = mo.md(
+            "> 🛠️ `split_by_record` is not implemented yet. Fill in the TODO in "
+            "`time_series_exercise.py`, then re-run this cell."
+        )
+    elif np.asarray(is_test).dtype != bool or len(is_test) != len(rec_ecg):
+        out_split = mo.md(
+            "> ⚠️ `split_by_record` must return a **boolean** array, one entry per "
+            "beat (not a list of indices)."
+        )
+    elif is_test.all() or not is_test.any():
+        out_split = mo.md(
+            "> ⚠️ Your split puts every beat on one side. Return a mix of True/False."
+        )
     else:
-        import torch as _torch
-        import torch.nn as _nn
+        _train_recs = set(rec_ecg[~is_test])
+        _test_recs = set(rec_ecg[is_test])
+        _shared = _train_recs & _test_recs
+        _n_rec = len(set(rec_ecg))
+        _both_classes = (
+            len(np.unique(y_ecg[~is_test])) == 2 and len(np.unique(y_ecg[is_test])) == 2
+        )
+        if _shared:
+            out_split = mo.md(
+                f"> ❌ **Leakage.** {len(_shared)} of {_n_rec} records have beats in "
+                "**both** train and test. A 1D CNN can then memorise a record's lead "
+                "placement and baseline noise and recognise it at test time, so the "
+                "AUROC is inflated and will not hold on a new patient.\n>\n"
+                "> **Fix:** split the *unique record ids*, not the beats: put whole "
+                "records into train or test (e.g. `GroupKFold` / `GroupShuffleSplit` "
+                "keyed on `record_ids`). Every beat of a record then stays on one side."
+            )
+        else:
+            _msg = (
+                f"> ✅ **Leak-free.** No record appears on both sides "
+                f"({len(_train_recs)} train records, {len(_test_recs)} test records). "
+                f"Note the test set is **{is_test.mean():.0%}** of the beats, not exactly "
+                "20%: it follows whole records, so the count depends on which records you "
+                "held out, not on a fixed beat fraction."
+            )
+            if not _both_classes:
+                _msg += (
+                    "  \n> (Heads up: one side is missing a class; rebalance which "
+                    "records you hold out.)"
+                )
+            out_split = mo.md(_msg)
+    out_split
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Baseline vs shallow CNN vs dilated TCN
+
+    Three models on the same leak-free (record-grouped) folds:
+
+    **Baseline**: five generic summary statistics per beat (mean, std, min, max, last
+    value), the same flat baseline as the MIMIC cell. They see all 200 samples but
+    discard the *shape* of the QRS.
+
+    **Shallow CNN**: two `k=5` convolutions. Its **receptive field is only ~9 of the
+    200 samples**, so each feature sees a narrow window (slid across the beat by the
+    final max-pool).
+
+    **Dilated TCN**: the same idea, but with the **dilated / causal convolutions** from
+    the lecture (WaveNet / GluNet / TCN family). Stacking dilations 1-2-4-8-16 grows the
+    receptive field to **~63 samples**, enough to span the whole wide-QRS morphology that
+    marks a PVC. The question: does seeing more of the beat at once actually help here?
+    """)
+    return
+
+
+@app.cell
+def _(BLUE, MITBIH_OK, RED, X_ecg, mo, np, plt, rec_ecg, y_ecg):
+    if not MITBIH_OK:
+        out_ecg = mo.md("*(MIT-BIH data not bundled: baseline-vs-CNN benchmark skipped.)*")
+    else:
         from sklearn.linear_model import LogisticRegression as _LR
         from sklearn.preprocessing import StandardScaler as _SS
-        from sklearn.model_selection import StratifiedKFold as _SKF
+        from sklearn.model_selection import GroupKFold as _GKF
         from sklearn.metrics import roc_auc_score as _auc
 
-        def _ecg_features(X):
-            # Same flat baseline as the MIMIC cell: generic summary statistics, not
-            # engineered morphology. Per beat: mean, std, min, max, last value.
-            x = X[:, 0, :]
-            return np.column_stack([x.mean(1), x.std(1), x.min(1), x.max(1), x[:, -1]])
+        # Your Part 1-A code: the flat baseline, the two models and the
+        # training loop all come from time_series_exercise.py (or the reference).
+        try:
+            import time_series_solution as _ts
+        except ModuleNotFoundError:
+            import time_series_exercise as _ts
 
-        class _BeatCNN(_nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.net = _nn.Sequential(
-                    _nn.Conv1d(1, 16, 5, padding=2),
-                    _nn.ReLU(),
-                    _nn.Conv1d(16, 32, 5, padding=2),
-                    _nn.ReLU(),
-                    _nn.AdaptiveMaxPool1d(1),
-                    _nn.Flatten(),  # max-pool keeps the localized QRS shape
-                    _nn.Dropout(0.3),
-                    _nn.Linear(32, 1),
-                )
-
-            def forward(self, x):
-                return self.net(x).squeeze(-1)
-
-        def _fit_beat_cnn(Xtr, ytr, Xte, seed):
-            _torch.manual_seed(seed)
-            dev = "cuda" if _torch.cuda.is_available() else "cpu"
-            m = _BeatCNN().to(dev)
-            pos = float((ytr == 0).sum()) / float((ytr == 1).sum())
-            opt = _torch.optim.Adam(m.parameters(), lr=1e-3, weight_decay=1e-4)
-            lf = _nn.BCEWithLogitsLoss(pos_weight=_torch.tensor([pos], device=dev))
-            Xt = _torch.tensor(Xtr, device=dev)
-            yt = _torch.tensor(ytr, dtype=_torch.float32, device=dev)
-            n, bs = len(Xt), 128
-            m.train()
-            for _ep in range(15):  # minibatch SGD: ~thousands of updates
-                for _i in _torch.randperm(n, device=dev).split(bs):
-                    opt.zero_grad()
-                    lf(m(Xt[_i]), yt[_i]).backward()
-                    opt.step()
-            m.eval()
-            with _torch.no_grad():
-                return _torch.sigmoid(m(_torch.tensor(Xte, device=dev))).cpu().numpy()
-
-        F_ecg = _ecg_features(X_ecg)
-        auc_ecg_lr, auc_ecg_cnn = [], []
-        for _tr, _te in _SKF(5, shuffle=True, random_state=0).split(X_ecg, y_ecg):
+        F_ecg = _ts.ecg_summary_features(X_ecg)
+        auc_ecg_lr, auc_ecg_cnn, auc_ecg_tcn = [], [], []
+        # GroupKFold on the record id: every beat of a record stays on one side,
+        # so the model is scored on patients/records it never trained on.
+        for _tr, _te in _GKF(5).split(X_ecg, y_ecg, rec_ecg):
             _sc = _SS().fit(F_ecg[_tr])
             _lr = _LR(max_iter=1000, C=1.0, class_weight="balanced").fit(
                 _sc.transform(F_ecg[_tr]), y_ecg[_tr]
@@ -620,33 +701,44 @@ def _(BLUE, MITBIH_OK, RED, X_ecg, mo, np, plt, y_ecg):
                 _auc(y_ecg[_te], _lr.predict_proba(_sc.transform(F_ecg[_te]))[:, 1])
             )
             auc_ecg_cnn.append(
-                _auc(y_ecg[_te], _fit_beat_cnn(X_ecg[_tr], y_ecg[_tr], X_ecg[_te], 0))
+                _auc(y_ecg[_te], _ts.train_cnn(_ts.make_beat_cnn, X_ecg[_tr], y_ecg[_tr], X_ecg[_te]))
+            )
+            auc_ecg_tcn.append(
+                _auc(y_ecg[_te], _ts.train_cnn(_ts.make_tcn, X_ecg[_tr], y_ecg[_tr], X_ecg[_te]))
             )
 
         print(
             f"MIT-BIH  logistic (5 features): {np.mean(auc_ecg_lr):.3f} ± {np.std(auc_ecg_lr):.3f}"
         )
         print(
-            f"MIT-BIH  1D-CNN (raw waveform): {np.mean(auc_ecg_cnn):.3f} ± {np.std(auc_ecg_cnn):.3f}"
+            f"MIT-BIH  shallow CNN (RF~9):    {np.mean(auc_ecg_cnn):.3f} ± {np.std(auc_ecg_cnn):.3f}"
+        )
+        print(
+            f"MIT-BIH  dilated TCN (RF~63):   {np.mean(auc_ecg_tcn):.3f} ± {np.std(auc_ecg_tcn):.3f}"
         )
 
-        fig_ecg, ax_ecg = plt.subplots(figsize=(5, 4.5))
-        _m = [np.mean(auc_ecg_lr), np.mean(auc_ecg_cnn)]
-        _e = [np.std(auc_ecg_lr), np.std(auc_ecg_cnn)]
+        fig_ecg, ax_ecg = plt.subplots(figsize=(5.6, 4.5))
+        _m = [np.mean(auc_ecg_lr), np.mean(auc_ecg_cnn), np.mean(auc_ecg_tcn)]
+        _e = [np.std(auc_ecg_lr), np.std(auc_ecg_cnn), np.std(auc_ecg_tcn)]
         _bars = ax_ecg.bar(
-            ["logistic\n(5 summary\nstats)", "1D-CNN\n(raw waveform)"],
+            [
+                "logistic\n(5 summary\nstats)",
+                "shallow CNN\n(RF ~9)",
+                "dilated TCN\n(RF ~63)",
+            ],
             _m,
             yerr=_e,
             capsize=6,
-            color=[BLUE, RED],
+            color=[BLUE, RED, "#2A9D8F"],
             alpha=0.85,
             error_kw={"elinewidth": 1.8},
         )
         ax_ecg.axhline(0.5, color="k", lw=0.9, ls="--", alpha=0.4)
         ax_ecg.set_ylim(0.5, 1.02)
-        ax_ecg.set_ylabel("AUROC  (5-fold CV)")
+        ax_ecg.set_ylabel("AUROC  (5-fold GroupKFold)")
         ax_ecg.set_title(
-            f"MIT-BIH: Normal vs PVC  ({len(y_ecg):,} beats)\nCNN reads the raw QRS shape",
+            f"MIT-BIH: Normal vs PVC  ({len(y_ecg):,} beats)\n"
+            "leak-free CV: a bigger receptive field helps only a little",
             fontsize=10,
         )
         for _b, _v in zip(_bars, _m):
@@ -665,128 +757,49 @@ def _(BLUE, MITBIH_OK, RED, X_ecg, mo, np, plt, y_ecg):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ---
-    ## A design choice: which pooling? Know the problem first
+    ### The lesson
 
-    The CNN ends by **pooling** its feature maps over time into one number per channel,
-    then classifying. Which pooling to use is not a default to accept blindly; it should
-    match *where the signal lives*:
-
-    * **Average pooling**: "how strong is this pattern *on average* across the beat?"
-      Suited to a **diffuse** signal (a sustained level or slow trend).
-    * **Max pooling**: "did this pattern fire *anywhere*?" Suited to a **localized event**.
-
-    A PVC is a localized event: one wide, abnormal QRS complex. Averaging dilutes it among
-    ~200 ordinary samples; max pooling keeps the peak. So the clinical picture, not the
-    default, tells us to use **max**. Let us test that the choice actually matters.
+    Under leak-free evaluation the fancier model barely pulled ahead: the dilated
+    TCN's larger receptive field bought only a point or two over the shallow CNN,
+    well within the noise of a 47-record cohort. The recurring theme in clinical ML
+    is not "reach for a bigger model": it is **understand the structure of the
+    signal and of the data first**, then choose accordingly. The same reasoning runs
+    through this lecture: **causal** vs acausal convolutions for online onset
+    detection, the **sampling grid** for irregular visits, and the **loss** for
+    class imbalance. And as the split exercise showed, an honest evaluation matters
+    more than the model.
     """)
-    return
-
-
-@app.cell
-def _(GREY, MITBIH_OK, RED, X_ecg, mo, np, plt, y_ecg):
-    if not MITBIH_OK:
-        out_pool = mo.md("*(MIT-BIH data not bundled — pooling comparison skipped.)*")
-    else:
-        import torch as _t
-        import torch.nn as _n
-        from sklearn.model_selection import StratifiedKFold as _SKF2
-        from sklearn.metrics import roc_auc_score as _auc2
-
-        def _cnn(pool):
-            _P = _n.AdaptiveMaxPool1d(1) if pool == "max" else _n.AdaptiveAvgPool1d(1)
-            return _n.Sequential(
-                _n.Conv1d(1, 16, 5, padding=2),
-                _n.ReLU(),
-                _n.Conv1d(16, 32, 5, padding=2),
-                _n.ReLU(),
-                _P,
-                _n.Flatten(),
-                _n.Dropout(0.3),
-                _n.Linear(32, 1),
-            )
-
-        def _fit(Xtr, ytr, Xte, pool):
-            _t.manual_seed(0)
-            _dev = "cuda" if _t.cuda.is_available() else "cpu"
-            _m = _cnn(pool).to(_dev)
-            _pw = float((ytr == 0).sum()) / float((ytr == 1).sum())
-            _opt = _t.optim.Adam(_m.parameters(), lr=1e-3, weight_decay=1e-4)
-            _lf = _n.BCEWithLogitsLoss(pos_weight=_t.tensor([_pw], device=_dev))
-            _X = _t.tensor(Xtr, device=_dev)
-            _y = _t.tensor(ytr, dtype=_t.float32, device=_dev)
-            _m.train()
-            for _ in range(15):
-                for _i in _t.randperm(len(_X), device=_dev).split(128):
-                    _opt.zero_grad()
-                    _lf(_m(_X[_i]).squeeze(-1), _y[_i]).backward()
-                    _opt.step()
-            _m.eval()
-            with _t.no_grad():
-                return _t.sigmoid(_m(_t.tensor(Xte, device=_dev)).squeeze(-1)).cpu().numpy()
-
-        tp_res = {}
-        for _pool in ("avg", "max"):
-            _a = []
-            for _tr, _te in _SKF2(5, shuffle=True, random_state=0).split(X_ecg, y_ecg):
-                _a.append(
-                    _auc2(y_ecg[_te], _fit(X_ecg[_tr], y_ecg[_tr], X_ecg[_te], _pool))
-                )
-            tp_res[_pool] = (float(np.mean(_a)), float(np.std(_a)))
-            print(
-                f"1D-CNN {_pool}-pool (5-fold): {tp_res[_pool][0]:.3f} ± {tp_res[_pool][1]:.3f}"
-            )
-
-        fig_pool, ax_pool = plt.subplots(figsize=(5, 4.5))
-        _mm = [tp_res["avg"][0], tp_res["max"][0]]
-        _ee = [tp_res["avg"][1], tp_res["max"][1]]
-        _bp = ax_pool.bar(
-            ["avg-pool\n(dilutes the spike)", "max-pool\n(keeps the spike)"],
-            _mm,
-            yerr=_ee,
-            capsize=6,
-            color=[GREY, RED],
-            alpha=0.85,
-            error_kw={"elinewidth": 1.8},
-        )
-        ax_pool.axhline(0.5, color="k", lw=0.9, ls="--", alpha=0.4)
-        ax_pool.set_ylim(0.5, 1.02)
-        ax_pool.set_ylabel("AUROC  (5-fold CV)")
-        ax_pool.set_title(
-            "Same CNN, only the pooling differs\n(a PVC is a local spike)", fontsize=10
-        )
-        for _b, _v in zip(_bp, _mm):
-            ax_pool.annotate(
-                f"{_v:.3f}",
-                (_b.get_x() + _b.get_width() / 2, _v + 0.005),
-                ha="center",
-                fontsize=13,
-            )
-        fig_pool.tight_layout()
-        out_pool = fig_pool
-    out_pool
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### The lesson
+    ### Pen and paper: how should we split this dataset?
 
-    Nothing about the network changed; only one design choice, matched to the problem, did,
-    and AUROC moved from ~0.86 to ~0.91. This is the recurring theme in clinical ML:
-    **understand the structure of the signal first, then choose the operator.** The same
-    reasoning runs through this lecture: **causal** vs acausal convolutions (online onset
-    detection), the **sampling grid** (irregular visits), and the **loss** (class imbalance).
-    A default model is a starting point, not the answer.
+    The 48 records give **35610** beats in total. Suppose you evaluate the beat
+    classifier with an **80/20 train/validation split**.
     """)
     return
+
+
+@app.cell(hide_code=True)
+def _(mo, submission_radio_default):
+    _opts = {"True": "true", "False": "false"}
+    q_pp_ecg_split = mo.ui.radio(
+        options=_opts,
+        label="(A1) True or False: an 80/20 split puts exactly 0.8 x 35610 = "
+              "28488 beats in train and the other 7122 in validation.",
+        value=submission_radio_default("Q_PP_A_ECG_SPLIT", _opts),
+    )
+    q_pp_ecg_split
+    return (q_pp_ecg_split,)
 
 
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Section A — leak-free landmark survival on the PBC cohort
+    # Part 1 - B. Longitudinal data: leak-free landmark survival on the PBC cohort
 
     > **The setup.** The hepatology group hands you the **PBC** cohort
     > (primary biliary cirrhosis): 312 patients followed over years with repeated
@@ -805,7 +818,7 @@ def _(mo):
     2. a **tiny RNN** (one small GRU layer),
     3. a **tiny Transformer** (one small encoder layer).
 
-    Implement the functions in `prediction_exercise.py`, then run the cells below.
+    Implement the functions in `longitudinal_exercise.py`, then run the cells below.
     """)
     return
 
@@ -830,13 +843,12 @@ def _(Path, np, plt):
     pbc_df["died"] = pbc_df.groupby("id")["status"].transform(lambda s: int((s == 2).any()))
     nvis = pbc_df.groupby("id").size()
 
-    def lag1_corr(frame, col):
-        """Lag-1 autocorrelation: correlation between a visit and the same patient's next."""
-        y = np.log(frame[col].clip(lower=1e-3)) if col in LOGLABS else frame[col]
-        s = pd.DataFrame({"id": frame["id"], "day": frame["day"], "y": y}).dropna()
-        s = s.sort_values(["id", "day"])
-        pair = pd.DataFrame({"prev": s.groupby("id")["y"].shift(), "cur": s["y"]}).dropna()
-        return np.corrcoef(pair["prev"], pair["cur"])[0, 1]
+    # Your graded lag-1 autocorrelation (why persistence is hard to beat).
+    try:
+        import longitudinal_solution as _ll
+    except ModuleNotFoundError:
+        import longitudinal_exercise as _ll
+    lag1_corr = _ll.lag1_autocorr
 
     print(f"{pbc_df['id'].nunique()} patients, {len(pbc_df)} visits; "
           f"visits/patient median {int(nvis.median())} (range {nvis.min()}-{nvis.max()})")
@@ -856,7 +868,7 @@ def _(Path, np, plt):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Meet the data: what is PBC?
+    ### Meet the data: what is PBC?
 
     **Primary biliary cholangitis (PBC)** is a chronic **autoimmune** liver disease: the immune
     system attacks and slowly destroys the **small bile ducts** inside the liver. Bile can then
@@ -905,7 +917,7 @@ def _(PBC_BLUE, PBC_GREY, Path, plt):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## The PBC cohort at a glance
+    ### The PBC cohort at a glance
 
     `pbcseq` is the Mayo Clinic PBC trial: **312 patients**, followed for over a decade, seen at
     **repeated visits** (every 6-12 months) where a panel of **liver labs** is measured, until
@@ -946,7 +958,7 @@ def _(PBC_BLUE, PBC_GREY, PBC_RED, pbc_df, plt):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 1. Repeated measures
+    ### Repeated measures
 
     Each patient contributes a *sequence* of visits (median 5, up to 16), and bilirubin is
     tracked along a personal trajectory. Patients who later die (red) tend to ride higher.
@@ -977,7 +989,7 @@ def _(PBC_BLUE, PBC_RED, nvis, pbc_df, plt):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2. Within-patient correlation: the rows are not independent
+    ### Within-patient correlation: the rows are not independent
 
     The defining property of longitudinal data. **Left:** the gap between two visits of the
     **same** patient (green) is tiny next to two **random** visits (grey). **Right:** the
@@ -1020,7 +1032,7 @@ def _(LABS, PBC_BLUE, PBC_GREEN, PBC_GREY, PRETTY, lag1_corr, np, pbc_df, plt):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 3. Irregular and informative sampling
+    ### Irregular and informative sampling
 
     Longitudinal data rarely lands on a clean grid. **Left:** the gap $\Delta t$ between
     consecutive visits varies. **Right:** the *length* of a patient's series is itself
@@ -1060,13 +1072,13 @@ def _(Path):
     from sklearn.metrics import roc_auc_score
 
     # Prefer the reference solution if present (instructor side); otherwise fall
-    # back to the student stubs. You implement the TODOs in prediction_exercise.py.
+    # back to the student stubs. You implement the TODOs in longitudinal_exercise.py.
     # reload so edits to the module are picked up without restarting the kernel.
     import importlib as _importlib
     try:
-        import prediction_solution as pr
+        import longitudinal_solution as pr
     except ModuleNotFoundError:
-        import prediction_exercise as pr
+        import longitudinal_exercise as pr
     pr = _importlib.reload(pr)
 
     BLUE, RED, GREEN = "#344A9A", "#C8323C", "#00A082"
@@ -1094,7 +1106,7 @@ def _(Path):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Step 1: the logistic baseline
+    ### The logistic regression baseline
 
     Collapse each patient to summary statistics (mean / last / slope per lab)
     and fit logistic regression, scored by 5-fold cross-validated AUROC. Any
@@ -1131,7 +1143,7 @@ def _(
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Step 2: the two tiny sequence models
+    ### The two tiny sequence models
 
     Both are deliberately tiny (a few hundred parameters). Note the parameter
     counts: that is the whole budget the model gets to learn temporal shape from
@@ -1141,21 +1153,13 @@ def _(mo):
 
 
 @app.cell
-def _(StratifiedKFold, X, mask, np, pr, roc_auc_score, y):
+def _(X, mask, pr, y):
     print(f"RNN params:         {pr.count_parameters(pr.make_rnn(X.shape[2]))}")
     print(f"Transformer params: {pr.count_parameters(pr.make_transformer(X.shape[2]))}")
 
 
-    def cv_auroc(make):
-        scores = []
-        for tr, te in StratifiedKFold(5, shuffle=True, random_state=42).split(X, y):
-            model = pr.train_model(make(), X[tr], mask[tr], y[tr], epochs=60, seed=42)
-            scores.append(roc_auc_score(y[te], pr.predict_proba(model, X[te], mask[te])))
-        return float(np.mean(scores)), float(np.std(scores))
-
-
-    auc_rnn, sd_rnn = cv_auroc(lambda: pr.make_rnn(X.shape[2]))
-    auc_tfm, sd_tfm = cv_auroc(lambda: pr.make_transformer(X.shape[2]))
+    auc_rnn, sd_rnn = pr.cross_val_auroc(lambda: pr.make_rnn(X.shape[2]), X, mask, y)
+    auc_tfm, sd_tfm = pr.cross_val_auroc(lambda: pr.make_transformer(X.shape[2]), X, mask, y)
     print(f"RNN:         AUROC {auc_rnn:.3f} +/- {sd_rnn:.3f}")
     print(f"Transformer: AUROC {auc_tfm:.3f} +/- {sd_tfm:.3f}")
     return auc_rnn, auc_tfm
@@ -1186,7 +1190,7 @@ def _(BLUE, GREEN, RED, auc_base, auc_rnn, auc_tfm, plt):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Section A, part 2: forecasting the next visit's labs
+    ## Part 1 - B. Continued: forecasting the next visit's labs
 
     A regression flavour: instead of an outcome, predict the **next visit's lab
     vector** from the history (`load_forecasting`). The baseline is **persistence**
@@ -1205,7 +1209,6 @@ def _(mo):
 
 @app.cell
 def _(Path, np, pr):
-    from sklearn.model_selection import GroupKFold as _GKF
     import torch as _torch
     import torch.nn as _nn
 
@@ -1240,24 +1243,11 @@ def _(Path, np, pr):
             h = (h * m.unsqueeze(-1)).sum(1) / m.sum(1, keepdim=True).clamp(min=1)
             return self.fc(h)
 
-    def _cv_forecast(make):
-        err = np.zeros_like(Yf)
-        for _tr, _te in _GKF(5).split(Xf, Yf, gf):
-            _torch.manual_seed(42)
-            _m = make()
-            _opt = _torch.optim.Adam(_m.parameters(), lr=5e-3, weight_decay=1e-4)
-            _lf = _nn.MSELoss()
-            _Xt = _torch.tensor(Xf[_tr]); _Mt = _torch.tensor(maskf[_tr]); _Yt = _torch.tensor(Yf[_tr])
-            _m.train()
-            for _ in range(40):
-                _opt.zero_grad(); _lf(_m(_Xt, _Mt), _Yt).backward(); _opt.step()
-            _m.eval()
-            with _torch.no_grad():
-                err[_te] = np.abs(_m(_torch.tensor(Xf[_te]), _torch.tensor(maskf[_te])).numpy() - Yf[_te])
-        return float(err.mean())
 
-    print(f"tiny RNN forecaster         MAE: {_cv_forecast(lambda: _RNNForecast(Xf.shape[2])):.3f}")
-    print(f"tiny Transformer forecaster MAE: {_cv_forecast(lambda: _TFMForecast(Xf.shape[2])):.3f}")
+    print(f"tiny RNN forecaster         MAE: "
+          f"{pr.groupkfold_mae(lambda: _RNNForecast(Xf.shape[2]), Xf, maskf, Yf, gf):.3f}")
+    print(f"tiny Transformer forecaster MAE: "
+          f"{pr.groupkfold_mae(lambda: _TFMForecast(Xf.shape[2]), Xf, maskf, Yf, gf):.3f}")
     print("(persistence is the one to beat)")
     return
 
@@ -1265,7 +1255,7 @@ def _(Path, np, pr):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ### Section A pen-and-paper questions
+    ### pen-and-paper questions
 
     Answer the three questions below from what you saw. They auto-save to
     `submission.json` (read by the autograder).
@@ -1283,9 +1273,9 @@ def _(mo, submission_radio_default):
     }
     q_pp_a_leak = mo.ui.radio(
         options=_opts,
-        label="(A1) Why describe a patient by their first 2 years and predict "
+        label="(B1) Why describe a patient by their first 2 years and predict "
               "death within 5 years, rather than whether they *ever* died?",
-        value=submission_radio_default("Q_PP_A_LEAK", _opts),
+        value=submission_radio_default("Q_PP_B_LEAK", _opts),
     )
     q_pp_a_leak
     return (q_pp_a_leak,)
@@ -1301,8 +1291,8 @@ def _(mo, submission_radio_default):
     }
     q_pp_a_compare = mo.ui.radio(
         options=_opts,
-        label="(A2) On the leak-free landmark task, how do the three models compare?",
-        value=submission_radio_default("Q_PP_A_COMPARE", _opts),
+        label="(B2) On the leak-free landmark task, how do the three models compare?",
+        value=submission_radio_default("Q_PP_B_COMPARE", _opts),
     )
     q_pp_a_compare
     return (q_pp_a_compare,)
@@ -1318,22 +1308,173 @@ def _(mo, submission_radio_default):
     }
     q_pp_a_size = mo.ui.radio(
         options=_opts,
-        label="(A3) You shrink the RNN from hidden=16 to hidden=4. What happens?",
-        value=submission_radio_default("Q_PP_A_SIZE", _opts),
+        label="(B3) You shrink the RNN from hidden=16 to hidden=4. What happens?",
+        value=submission_radio_default("Q_PP_B_SIZE", _opts),
     )
     q_pp_a_size
     return (q_pp_a_size,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Attention puzzle: diagnose four patients' models
+
+    Imagine a **single-head** Transformer. Below are the attention matrices it
+    produced for **four patients** (rows = query visit, columns = the visit
+    attended to; each row sums to 1). Each visit's representation is the
+    **weighted average** of all visits, using its row of weights.
+
+    The four patients had very different clinical courses, and the attention map
+    reflects what the model leaned on for each. Below are four short clinical
+    situations. Read each matrix, work out the pattern it implies, and match it to
+    the patient. Two patterns connect back to models you already built: the
+    logistic **mean-summary** baseline and **persistence**.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(np, plt):
+    # Four synthetic single-head attention matrices (rows = query, cols = key;
+    # each row sums to 1). Archetypes are scrambled across the patient numbers.
+    _mats = {
+        1: np.array([[0.10, 0.10, 0.15, 0.65],    # recency: every row -> last visit
+                     [0.12, 0.08, 0.15, 0.65],
+                     [0.08, 0.10, 0.17, 0.65],
+                     [0.05, 0.08, 0.12, 0.75]]),
+        2: np.array([[0.79, 0.07, 0.07, 0.07],    # self/diagonal: no context mixing
+                     [0.07, 0.79, 0.07, 0.07],
+                     [0.07, 0.07, 0.79, 0.07],
+                     [0.07, 0.07, 0.07, 0.79]]),
+        3: np.array([[0.70, 0.10, 0.10, 0.10],    # baseline: every row -> first visit
+                     [0.68, 0.12, 0.10, 0.10],
+                     [0.71, 0.09, 0.12, 0.08],
+                     [0.72, 0.10, 0.10, 0.08]]),
+        4: np.array([[0.24, 0.26, 0.25, 0.25],    # uniform: averaging
+                     [0.26, 0.24, 0.25, 0.25],
+                     [0.25, 0.25, 0.26, 0.24],
+                     [0.25, 0.25, 0.24, 0.26]]),
+    }
+    _fig, _axes = plt.subplots(1, 4, figsize=(11.5, 3.1))
+    _lbl = ["v1", "v2", "v3", "v4"]
+    for _ax, _pid in zip(_axes, _mats):
+        _A = _mats[_pid]
+        _ax.imshow(_A, cmap="Oranges", vmin=0, vmax=1)
+        _ax.set_xticks(range(4)); _ax.set_yticks(range(4))
+        _ax.set_xticklabels(_lbl, fontsize=8); _ax.set_yticklabels(_lbl, fontsize=8)
+        _ax.set_title(f"Patient {_pid}", fontsize=11)
+        for _r in range(4):
+            for _c in range(4):
+                _ax.text(_c, _r, f"{_A[_r, _c]:.2f}", ha="center", va="center",
+                         fontsize=6.5,
+                         color="white" if _A[_r, _c] > 0.5 else "black")
+    _axes[0].set_ylabel("query visit", fontsize=8)
+    _fig.supxlabel("key (visit attended to)", fontsize=9)
+    _fig.tight_layout()
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, submission_radio_default):
+    _opts = {"Patient 1": "1", "Patient 2": "2", "Patient 3": "3", "Patient 4": "4"}
+    q_pp_attn_avg = mo.ui.radio(
+        options=_opts,
+        label="(B4) A patient whose labs stay stable and unremarkable across "
+              "every visit, with no single visit standing out. Which patient?",
+        value=submission_radio_default("Q_PP_B_ATTN_AVG", _opts),
+    )
+    q_pp_attn_avg
+    return (q_pp_attn_avg,)
+
+
+@app.cell(hide_code=True)
+def _(mo, submission_radio_default):
+    _opts = {"Patient 1": "1", "Patient 2": "2", "Patient 3": "3", "Patient 4": "4"}
+    q_pp_attn_recency = mo.ui.radio(
+        options=_opts,
+        label="(B5) A patient who was stable for years, then deteriorated "
+              "abruptly over the final visits. Whose attention map fits?",
+        value=submission_radio_default("Q_PP_B_ATTN_RECENCY", _opts),
+    )
+    q_pp_attn_recency
+    return (q_pp_attn_recency,)
+
+
+@app.cell(hide_code=True)
+def _(mo, submission_radio_default):
+    _opts = {"Patient 1": "1", "Patient 2": "2", "Patient 3": "3", "Patient 4": "4"}
+    q_pp_attn_self = mo.ui.radio(
+        options=_opts,
+        label="(B6) A patient seen for unrelated one-off problems each time, "
+              "with no connecting trajectory between visits. Which patient?",
+        value=submission_radio_default("Q_PP_B_ATTN_SELF", _opts),
+    )
+    q_pp_attn_self
+    return (q_pp_attn_self,)
+
+
+@app.cell(hide_code=True)
+def _(mo, submission_radio_default):
+    _opts = {"Patient 1": "1", "Patient 2": "2", "Patient 3": "3", "Patient 4": "4"}
+    q_pp_attn_baseline = mo.ui.radio(
+        options=_opts,
+        label="(B7) A patient with a dramatic abnormality at the very first "
+              "visit, a very high baseline bilirubin, that never recurred but "
+              "still defines their prognosis. Which patient?",
+        value=submission_radio_default("Q_PP_B_ATTN_BASELINE", _opts),
+    )
+    q_pp_attn_baseline
+    return (q_pp_attn_baseline,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Spot the trustworthy result
+
+    Four teams enter the PBC challenge. Every team does the honest part right:
+    features from each patient's **first 2 years**, label = **death within 5
+    years**, and folds **split by patient**. All four proudly report
+    **AUROC ≈ 0.95**. But the reviewers know **three of them leaked** somewhere
+    else in the pipeline. You are the reviewer: whose number would you actually
+    trust?
+
+    Reminder: leakage is any way that test-set information sneaks into training
+    or preprocessing. Nothing else counts.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, submission_radio_default):
+    _opts = {
+        "Team A standardizes each lab using a separate, older cohort's "
+        "mean and SD.": "a",
+        "Team B drops patients whose labs are most extreme across the whole "
+        "dataset.": "b",
+        "Team C reports the best AUROC out of 20 random patient-level splits.": "c",
+        "Team D adds each patient's total number of visits as a feature.": "d",
+    }
+    q_pp_leakfree = mo.ui.radio(
+        options=_opts,
+        label="(B8) Whose reported AUROC would you actually trust?",
+        value=submission_radio_default("Q_PP_B_LEAKFREE", _opts),
+    )
+    q_pp_leakfree
+    return (q_pp_leakfree,)
+
+
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Section B — Tracking: from frames to trajectories
+    # Part 2: Tracking (from frames to trajectories)
 
     > **The setup.** Your lab images a dish of migrating cells under a
     > microscope. Every few minutes the segmentation pipeline spits out
     > a *frame*: a handful of $(x, y)$ detections, one per cell. The
-    > catch — **the detector does not know which cell is which**. Frame
+    > catch: **the detector does not know which cell is which**. Frame
     > to frame, the dots are unlabelled and arrive in arbitrary order.
     >
     > A biologist wants *trajectories*: which dot in frame $t{+}1$ is the
@@ -1343,7 +1484,7 @@ def _(mo):
 
     Your plan:
 
-    - **A.** Treat one frame-to-frame step as an **assignment problem** —
+    - **A.** Treat one frame-to-frame step as an **assignment problem**:
       build a cost matrix of distances, then solve it two ways:
       **greedy nearest-neighbour** and the **Hungarian algorithm**. On a
       clean step they agree.
@@ -1351,9 +1492,9 @@ def _(mo):
       knocked and *every* detection jumps. Greedy strands a track and pays
       a higher cost; **Hungarian** recovers the right identities.
     - **C.** **Chain** one-step matches into full tracks and count
-      **identity switches** — greedy vs Hungarian.
+      **identity switches**: greedy vs Hungarian.
     - **D.** Identities also **break at a crossing**. **Predict-then-match**
-      (constant-velocity motion) carries them through the crossing — but
+      (constant-velocity motion) carries them through the crossing: but
       *not* through the bump. **No single cost wins everywhere.**
 
     The cohort: **3 cells over 8 frames** in `data/detections.csv`. Two of
@@ -1386,7 +1527,7 @@ def _(DATA_PATH, mo, trk):
         f"Loaded **{df['det_id'].max() + 1} detections × "
         f"{df['frame'].max() + 1} frames**. Columns: "
         f"`{', '.join(df.columns)}`. The `track_id` column is the "
-        f"ground truth — used only to *score* a tracker, never to match."
+        f"ground truth: used only to *score* a tracker, never to match."
     )
     return df, gt_list, pos_list
 
@@ -1402,11 +1543,11 @@ def _(mo):
     mo.md(r"""
     ### What the detector sees vs. what is really there
 
-    Left: the raw detections, coloured by **frame** — this is all a
+    Left: the raw detections, coloured by **frame**. This is all a
     tracker gets. Right: the same points coloured by the **hidden
     ground-truth identity**, with the true trajectories drawn in. Notice
     two tracks heading straight for each other (a **crossing**), and the
-    sharp **vertical jump** of every track at frame 2 — the dish bump.
+    sharp **vertical jump** of every track at frame 2: the dish bump.
     """)
     return
 
@@ -1446,7 +1587,7 @@ def _(gt_list, np, pos_list):
     # READING AID (scoring only): order each frame's detections by their
     # true identity, so row i and column i are the same cell and the
     # *correct* assignment is the diagonal {0:0, 1:1, 2:2}. A real tracker
-    # never gets to do this — it only sees the scrambled det_id order.
+    # never gets to do this: it only sees the scrambled det_id order.
     def aligned(t):
         order = np.argsort(gt_list[t])
         return pos_list[t][order]
@@ -1457,18 +1598,18 @@ def _(gt_list, np, pos_list):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## A — one frame-to-frame step is an assignment problem
+    ## Part 2-A. One frame-to-frame step is an assignment problem
 
     Take frame 0 and frame 1. Each has the same three detections. To link
     them we score every (frame-0 dot, frame-1 dot) pair by how far apart
-    they are — that is your **cost matrix** `cost_matrix(src, dst)` — and
+    they are (that is your **cost matrix** `cost_matrix(src, dst)`) and
     then pick a one-to-one matching.
 
     Two ways to pick:
 
-    - **`greedy_nn`** — walk the rows top to bottom; each track grabs its
+    - **`greedy_nn`**: walk the rows top to bottom; each track grabs its
       nearest *still-free* detection. Fast, intuitive, order-dependent.
-    - **`hungarian`** — minimise the *total* cost over all one-to-one
+    - **`hungarian`**: minimise the *total* cost over all one-to-one
       matchings (via `scipy.optimize.linear_sum_assignment`), with a
       guarantee.
 
@@ -1489,12 +1630,12 @@ def _(aligned, trk):
 @app.cell
 def _(clean_cost, clean_greedy, clean_hung, mo, np):
     mo.md(
-        f"**Clean step (frames 0 → 1)** — cost matrix (rounded):\n\n"
+        f"**Clean step (frames 0 → 1)**: cost matrix (rounded):\n\n"
         f"`{np.round(clean_cost, 2).tolist()}`\n\n"
         f"- greedy : assignment `{clean_greedy[0]}`, total **{clean_greedy[1]:.2f}**, "
         f"collided = `{clean_greedy[2]}`\n"
         f"- hungarian: assignment `{clean_hung[0]}`, total **{clean_hung[1]:.2f}**\n\n"
-        f"Both pick the diagonal `{{0:0, 1:1, 2:2}}` — when the nearest "
+        f"Both pick the diagonal `{{0:0, 1:1, 2:2}}`: when the nearest "
         f"neighbours don't conflict, greedy is already optimal."
     )
     return
@@ -1503,10 +1644,10 @@ def _(clean_cost, clean_greedy, clean_hung, mo, np):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## B — the dish gets bumped (drift breaks greedy)
+    ## Part 2-B. The dish gets bumped (drift breaks greedy)
 
     Between frame 1 and frame 2 someone knocks the microscope stage, so
-    **every detection jumps** by the same offset — and stays shifted from
+    **every detection jumps** by the same offset, and stays shifted from
     then on. The jump is large enough that, looking only at raw distance,
     one cell's new detection lands closer to a *different* cell's old spot.
 
@@ -1515,7 +1656,7 @@ def _(mo):
     belongs to another track, and a later row is stranded with an
     expensive scrap: the result is **wrong** (identities mislinked) *and*
     **cost-suboptimal**. The **Hungarian** algorithm optimises the total
-    globally — and because a rigid shift preserves the relative geometry,
+    globally, and because a rigid shift preserves the relative geometry,
     it recovers the correct identities.
     """)
     return
@@ -1532,17 +1673,17 @@ def _(aligned, trk):
 @app.cell
 def _(drift_cost, drift_greedy, drift_hung, mo, np):
     mo.md(
-        f"**Drift step (frames 1 → 2)** — cost matrix (rounded):\n\n"
+        f"**Drift step (frames 1 → 2)**: cost matrix (rounded):\n\n"
         f"`{np.round(drift_cost, 2).tolist()}`\n\n"
         f"| method | assignment | total cost |\n"
         f"|---|---|---|\n"
         f"| greedy | `{drift_greedy[0]}` | **{drift_greedy[1]:.2f}** |\n"
         f"| hungarian | `{drift_hung[0]}` | **{drift_hung[1]:.2f}** |\n\n"
         f"The correct answer is the diagonal `{{0:0, 1:1, 2:2}}`. Greedy "
-        f"returns `{drift_greedy[0]}` (collided = `{drift_greedy[2]}`) — "
-        f"wrong — and pays **{drift_greedy[1] - drift_hung[1]:.2f}** extra "
+        f"returns `{drift_greedy[0]}` (collided = `{drift_greedy[2]}`): "
+        f"wrong, and pays **{drift_greedy[1] - drift_hung[1]:.2f}** extra "
         f"cost over Hungarian, which recovers the diagonal. *Same data, "
-        f"same cost function — a better solver is what saved us here.*"
+        f"same cost function: a better solver is what saved us here.*"
     )
     return
 
@@ -1550,12 +1691,12 @@ def _(drift_cost, drift_greedy, drift_hung, mo, np):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## C — chain one-step matches into tracks
+    ## Part 2-C. Chain one-step matches into tracks
 
     A trajectory is just one-step matches stitched together: seed labels
     from frame 0, then for every later frame match the previous detections
     to the current ones and carry each label forward. `link_tracks(pos,
-    matcher)` does exactly that — pass it either matcher.
+    matcher)` does exactly that: pass it either matcher.
 
     We run it with **greedy** and with **Hungarian**, plot the recovered
     trajectories, and score them with `count_id_switches` against the
@@ -1626,14 +1767,14 @@ def _(gt_list, plot_tracks, plt, pos_list, trk):
     plot_tracks(
         pos_list,
         greedy_labels,
-        f"greedy linking — {sw_greedy} ID switches",
+        f"greedy linking: {sw_greedy} ID switches",
         _a1,
         gt_seq=gt_list,
     )
     plot_tracks(
         pos_list,
         hung_labels,
-        f"Hungarian linking — {sw_hung} ID switches",
+        f"Hungarian linking: {sw_hung} ID switches",
         _a2,
         gt_seq=gt_list,
     )
@@ -1646,11 +1787,11 @@ def _(gt_list, plot_tracks, plt, pos_list, trk):
 def _(mo, sw_greedy, sw_hung):
     mo.md(
         f"Greedy: **{sw_greedy}** ID switches. Hungarian: **{sw_hung}**. "
-        f"Greedy trips **twice** — once at the dish bump, once at the "
+        f"Greedy trips **twice**: once at the dish bump, once at the "
         f"crossing. Hungarian fixes the bump (global optimisation), so it "
         f"trips only at the **crossing**. Those remaining switches are a "
         f"different kind of failure: there, distance itself is the wrong "
-        f"signal — even the optimal matching swaps identities, because once "
+        f"signal: even the optimal matching swaps identities, because once "
         f"two cells have crossed, the swap *is* the cheapest assignment. "
         f"That is what part D fixes."
     )
@@ -1660,7 +1801,7 @@ def _(mo, sw_greedy, sw_hung):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## D — predict, then match (and where it *doesn't* help)
+    ## Part 2-D. Predict, then match (and where it *doesn't* help)
 
     At a crossing the two cells are momentarily nearest the *wrong*
     neighbour, so any position-only cost mislinks them. The fix:
@@ -1683,8 +1824,8 @@ def _(aligned, mo, trk):
     cross_pred = trk.predict_then_match(aligned(2), aligned(3), aligned(4))
     mo.md(
         f"**Crossing step (frames 3 → 4).** Distance-only Hungarian: "
-        f"`{cross_dist}` — a swap (should be the diagonal). "
-        f"Predict-then-match: `{cross_pred}` — identities held. The "
+        f"`{cross_dist}`: a swap (should be the diagonal). "
+        f"Predict-then-match: `{cross_pred}`: identities held. The "
         f"velocity carried each cell *through* the crossing."
     )
     return
@@ -1699,7 +1840,7 @@ def _(gt_list, plot_tracks, plt, pos_list, trk):
     plot_tracks(
         pos_list,
         motion_labels,
-        f"predict-then-match — {sw_motion} ID switches",
+        f"predict-then-match: {sw_motion} ID switches",
         _ax,
         gt_seq=gt_list,
     )
@@ -1719,16 +1860,16 @@ def _(mo, sw_greedy, sw_hung, sw_motion):
     | Hungarian (position) | **{sw_hung}** | crossing only |
     | predict-then-match | **{sw_motion}** | dish bump only |
 
-    Predict-then-match sails through the **crossing** — but it *also* trips,
+    Predict-then-match sails through the **crossing**, but it *also* trips,
     at the **dish bump**: a constant-velocity model assumes smooth motion and
     cannot anticipate a sudden jump, so its prediction lands every cell off by
     the same offset and the match breaks (just like greedy). That is not a bug
-    to hide — it is the price of a simple motion model.
+    to hide: it is the price of a simple motion model.
 
     So the two failure modes need *different* fixes: global assignment
     (Hungarian) rescues the discontinuity, motion prediction rescues the
-    crossing. Real trackers (e.g. SORT) combine **both** — a motion model to
-    build the cost *and* a global solver to assign it — plus gating/re-init to
+    crossing. Real trackers (e.g. SORT) combine **both**: a motion model to
+    build the cost *and* a global solver to assign it: plus gating/re-init to
     catch the discontinuities neither handles alone."""
     )
     return
@@ -1737,10 +1878,10 @@ def _(mo, sw_greedy, sw_hung, sw_motion):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ### Section B pen-and-paper — run the Hungarian algorithm by hand
+    ### pen-and-paper: run the Hungarian algorithm by hand
 
     Work this **3×3** cost matrix (tracks = rows, detections = columns)
-    with pen and paper. It is a *fresh* matrix — not one from the lecture —
+    with pen and paper. It is a *fresh* matrix: not one from the lecture:
     so you have to actually turn the crank.
 
     $$
@@ -1772,8 +1913,8 @@ def _(mo, submission_default):
         start=0,
         stop=100,
         step=1,
-        label="(B-a) Greedy NN (rows top→bottom): what TOTAL cost does it pick?",
-        value=submission_default("Q_PP_GREEDY_TOTAL"),
+        label="(C1) Greedy NN (rows top→bottom): what TOTAL cost does it pick?",
+        value=submission_default("Q_PP_C_GREEDY_TOTAL"),
     )
     q_pp_greedy_total
     return (q_pp_greedy_total,)
@@ -1785,8 +1926,8 @@ def _(mo, submission_default):
         start=0,
         stop=100,
         step=1,
-        label="(B-b) Optimal (Hungarian) TOTAL cost:",
-        value=submission_default("Q_PP_OPT_TOTAL"),
+        label="(C2) Optimal (Hungarian) TOTAL cost:",
+        value=submission_default("Q_PP_C_OPT_TOTAL"),
     )
     q_pp_opt_total
     return (q_pp_opt_total,)
@@ -1802,10 +1943,10 @@ def _(mo, submission_radio_default):
     q_pp_strand = mo.ui.radio(
         options=_q_strand_opts,
         label=(
-            "(B-c) Which track does greedy strand — forced off its own "
+            "(C3) Which track does greedy strand: forced off its own "
             "nearest detection onto an expensive one?"
         ),
-        value=submission_radio_default("Q_PP_STRAND", _q_strand_opts),
+        value=submission_radio_default("Q_PP_C_STRAND", _q_strand_opts),
     )
     q_pp_strand
     return (q_pp_strand,)
@@ -1818,10 +1959,10 @@ def _(mo, submission_default):
         stop=3,
         step=1,
         label=(
-            "(B-d) After the row- and column-reductions, what is the "
+            "(C4) After the row- and column-reductions, what is the "
             "MINIMUM number of lines that cover all zeros?"
         ),
-        value=submission_default("Q_PP_LINES"),
+        value=submission_default("Q_PP_C_LINES"),
     )
     q_pp_lines
     return (q_pp_lines,)
@@ -1834,10 +1975,10 @@ def _(mo, submission_default):
         stop=20,
         step=1,
         label=(
-            "(B-e) In the adjust step, what is the smallest UNCOVERED "
+            "(C5) In the adjust step, what is the smallest UNCOVERED "
             "value you subtract / add?"
         ),
-        value=submission_default("Q_PP_ADJUST"),
+        value=submission_default("Q_PP_C_ADJUST"),
     )
     q_pp_adjust
     return (q_pp_adjust,)
@@ -1853,8 +1994,8 @@ def _(mo, submission_radio_default):
     }
     q_pp_assign = mo.ui.radio(
         options=_q_assign_opts,
-        label="(B-f) What is the optimal (minimum-cost) one-to-one assignment?",
-        value=submission_radio_default("Q_PP_ASSIGN", _q_assign_opts),
+        label="(C6) What is the optimal (minimum-cost) one-to-one assignment?",
+        value=submission_radio_default("Q_PP_C_ASSIGN", _q_assign_opts),
     )
     q_pp_assign
     return (q_pp_assign,)
@@ -1875,13 +2016,39 @@ def _(mo, submission_radio_default):
     q_pp_cross = mo.ui.radio(
         options=_q_cross_opts,
         label=(
-            "(B-g) Conceptual: at the crossing, both greedy and Hungarian swap "
+            "(C7) Conceptual: at the crossing, both greedy and Hungarian swap "
             "the two identities. What is the underlying reason?"
         ),
-        value=submission_radio_default("Q_PP_CROSS", _q_cross_opts),
+        value=submission_radio_default("Q_PP_C_CROSS", _q_cross_opts),
     )
     q_pp_cross
     return (q_pp_cross,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## One last exercise: grade *us*
+
+    Please fill out the **course teaching-evaluation form** on ILIAS. It is the
+    one task where *you* hold the pen and *we* get the score, so be honest about
+    what worked and what did not. It genuinely shapes next year's course. Tick
+    the box below once you have submitted it.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, submission_radio_default):
+    _opts = {"Yes, I did": "yes"}
+    q_pp_eval = mo.ui.radio(
+        options=_opts,
+        label="Have you filled out the course teaching-evaluation form "
+              "on ILIAS?",
+        value=submission_radio_default("Q_PP_EVAL", _opts),
+    )
+    q_pp_eval
+    return (q_pp_eval,)
 
 
 @app.cell
@@ -1892,8 +2059,15 @@ def _(
     q_pp_a_size,
     q_pp_adjust,
     q_pp_assign,
+    q_pp_attn_avg,
+    q_pp_attn_baseline,
+    q_pp_attn_recency,
+    q_pp_attn_self,
     q_pp_cross,
+    q_pp_ecg_split,
+    q_pp_eval,
     q_pp_greedy_total,
+    q_pp_leakfree,
     q_pp_lines,
     q_pp_opt_total,
     q_pp_strand,
@@ -1904,18 +2078,27 @@ def _(
     from pathlib import Path as _Path
 
     _submission = {
-        # Section A -- sequence models
-        "Q_PP_A_LEAK": q_pp_a_leak.value,
-        "Q_PP_A_COMPARE": q_pp_a_compare.value,
-        "Q_PP_A_SIZE": q_pp_a_size.value,
-        # Section B -- tracking
-        "Q_PP_GREEDY_TOTAL": q_pp_greedy_total.value,
-        "Q_PP_OPT_TOTAL": q_pp_opt_total.value,
-        "Q_PP_STRAND": q_pp_strand.value,
-        "Q_PP_LINES": q_pp_lines.value,
-        "Q_PP_ADJUST": q_pp_adjust.value,
-        "Q_PP_ASSIGN": q_pp_assign.value,
-        "Q_PP_CROSS": q_pp_cross.value,
+        # Part 1 - A -- ECG (data splitting)
+        "Q_PP_A_ECG_SPLIT": q_pp_ecg_split.value,
+        # Part 1 - B -- sequence models
+        "Q_PP_B_LEAK": q_pp_a_leak.value,
+        "Q_PP_B_COMPARE": q_pp_a_compare.value,
+        "Q_PP_B_SIZE": q_pp_a_size.value,
+        "Q_PP_B_ATTN_AVG": q_pp_attn_avg.value,
+        "Q_PP_B_ATTN_RECENCY": q_pp_attn_recency.value,
+        "Q_PP_B_ATTN_SELF": q_pp_attn_self.value,
+        "Q_PP_B_ATTN_BASELINE": q_pp_attn_baseline.value,
+        "Q_PP_B_LEAKFREE": q_pp_leakfree.value,
+        # Part 2 -- tracking
+        "Q_PP_C_GREEDY_TOTAL": q_pp_greedy_total.value,
+        "Q_PP_C_OPT_TOTAL": q_pp_opt_total.value,
+        "Q_PP_C_STRAND": q_pp_strand.value,
+        "Q_PP_C_LINES": q_pp_lines.value,
+        "Q_PP_C_ADJUST": q_pp_adjust.value,
+        "Q_PP_C_ASSIGN": q_pp_assign.value,
+        "Q_PP_C_CROSS": q_pp_cross.value,
+        # Course feedback
+        "Q_PP_EVAL": q_pp_eval.value,
     }
     _path = _Path(__file__).with_name("submission.json")
     _path.write_text(_json.dumps(_submission, indent=2))

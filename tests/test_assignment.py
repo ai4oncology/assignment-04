@@ -25,7 +25,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import torch  # noqa: E402
-import prediction_exercise as pr  # noqa: E402
+import longitudinal_exercise as pr  # noqa: E402
+import time_series_exercise as ts  # noqa: E402
 import tracking_exercise as trk  # noqa: E402
 
 DATA_PATH = os.path.join(ROOT, "data", "pbcseq.csv")
@@ -33,7 +34,7 @@ DETECTIONS_PATH = os.path.join(ROOT, "data", "detections.csv")
 
 
 # ===========================================================================
-# Section B -- tracking
+# Part 2 -- tracking
 # ===========================================================================
 @pytest.fixture(scope="module")
 def frames():
@@ -118,7 +119,7 @@ def test_motion_linker_trips_only_on_bump(frames):
 
 
 # ---------------------------------------------------------------------------
-# Section A -- data: padded sequences + mask + label
+# Part 1-B -- data: padded sequences + mask + label
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def seqs():
@@ -167,7 +168,7 @@ def test_summary_features(seqs):
 
 
 # ---------------------------------------------------------------------------
-# Section A -- the two tiny models
+# Part 1-B -- the two tiny models
 # ---------------------------------------------------------------------------
 def test_rnn_is_tiny_module(seqs):
     model = pr.make_rnn(pr.N_FEATURES)
@@ -191,7 +192,7 @@ def test_forward_returns_logits(seqs, factory):
 
 
 # ---------------------------------------------------------------------------
-# Section A -- training / evaluation
+# Part 1-B -- training / evaluation
 # ---------------------------------------------------------------------------
 def test_evaluate_auroc_edge_cases():
     y = np.array([0, 0, 1, 1])
@@ -219,7 +220,7 @@ def test_training_beats_chance(seqs, factory):
 
 
 # ---------------------------------------------------------------------------
-# Section A (part 2) -- next-visit forecasting (regression)
+# Part 1-B (continued) -- next-visit forecasting (regression)
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="module")
 def forecast():
@@ -251,6 +252,122 @@ def test_forecast_mae(forecast):
 
 
 # ---------------------------------------------------------------------------
+# Part 1-B -- leak-free cross-validation loops + autocorrelation diagnostic
+# ---------------------------------------------------------------------------
+def test_lag1_autocorr():
+    import pandas as pd
+    # within each patient the lab marches 1,2,3 -> consecutive (prev,cur) pairs are
+    # perfectly correlated; "albumin" is not log-transformed.
+    df = pd.DataFrame({
+        "id": [1, 1, 1, 2, 2, 2],
+        "day": [0, 1, 2, 0, 1, 2],
+        "albumin": [1.0, 2.0, 3.0, 1.0, 2.0, 3.0],
+    })
+    assert pr.lag1_autocorr(df, "albumin") == pytest.approx(1.0)
+    # on the real cohort the labs are strongly autocorrelated (why persistence wins)
+    real = pd.read_csv(DATA_PATH)
+    assert pr.lag1_autocorr(real, "bili") > 0.7
+
+
+def test_cross_val_auroc(seqs):
+    X, mask, y = seqs
+    mean, std = pr.cross_val_auroc(lambda: pr.make_rnn(pr.N_FEATURES), X, mask, y, epochs=25)
+    assert 0.0 <= mean <= 1.0 and std >= 0.0
+    assert mean > 0.6                            # cross-validated, clearly beats chance
+
+
+def test_groupkfold_mae(forecast):
+    X, mask, Y, groups = forecast
+
+    class _LastLinear(torch.nn.Module):
+        # tiny forecaster: read the last real visit, map it linearly to the next
+        def __init__(self, d):
+            super().__init__()
+            self.fc = torch.nn.Linear(d, d)
+
+        def forward(self, x, m):
+            last = m.sum(1).clamp(min=1).long() - 1
+            return self.fc(x[torch.arange(len(x)), last])
+
+    mae = pr.groupkfold_mae(lambda: _LastLinear(pr.N_FEATURES), X, mask, Y, groups, epochs=15)
+    assert np.isfinite(mae) and 0.0 < mae < 1.5
+
+
+# ---------------------------------------------------------------------------
+# Part 1-A -- leak-free ECG split (time_series_exercise.split_by_record)
+# ---------------------------------------------------------------------------
+def test_split_by_record_is_leak_free():
+    # 12 records, 7 beats each (record id repeated along the beats).
+    rec = np.repeat(np.arange(12), 7)
+    is_test = np.asarray(ts.split_by_record(rec, test_frac=0.25, seed=0))
+
+    # must be a boolean mask, one entry per beat
+    assert is_test.dtype == bool
+    assert is_test.shape == (len(rec),)
+    assert is_test.any() and not is_test.all()           # both sides non-empty
+
+    # the whole point: no record may appear on both sides
+    train_recs = set(rec[~is_test].tolist())
+    test_recs = set(rec[is_test].tolist())
+    assert not (train_recs & test_recs), "a record's beats leak across the split"
+
+    # roughly the requested fraction of RECORDS (not beats), and reproducible
+    assert 1 <= len(test_recs) <= 5
+    again = np.asarray(ts.split_by_record(rec, test_frac=0.25, seed=0))
+    assert np.array_equal(is_test, again)                # same seed -> same split
+
+
+def test_ecg_summary_features():
+    # two beats, one channel, four samples each: (n_beats, 1, beat_len)
+    X = np.array([[[1.0, 2.0, 3.0, 4.0]],
+                  [[-1.0, 0.0, 0.0, 5.0]]], dtype=np.float32)
+    F = ts.ecg_summary_features(X)
+    assert F.shape == (2, 5)                              # [mean, std, min, max, last]
+    assert F[0, 0] == pytest.approx(2.5)                  # mean of 1..4
+    assert F[0, 2] == pytest.approx(1.0)                  # min
+    assert F[0, 3] == pytest.approx(4.0)                  # max
+    assert F[0, 4] == pytest.approx(4.0)                  # last value
+    assert F[1, 4] == pytest.approx(5.0)
+
+
+def test_extract_beats():
+    sig = np.arange(20, dtype=np.float32)
+    beats, keep = ts.extract_beats(sig, [5, 10, 18], before=3, after=3)
+    assert keep.tolist() == [True, True, False]          # last window runs off the end
+    assert beats.shape == (2, 6)                          # before + after = 6 samples
+    assert np.allclose(beats.mean(axis=1), 0.0, atol=1e-5)   # each window z-scored
+    assert np.allclose(beats.std(axis=1), 1.0, atol=1e-3)
+
+
+def test_receptive_field():
+    assert ts.receptive_field(5, (1, 1)) == 9            # the shallow CNN (~9 samples)
+    assert ts.receptive_field(3, (1, 2, 4, 8, 16)) == 63  # the dilated TCN (~63 samples)
+
+
+@pytest.mark.parametrize("factory", ["make_beat_cnn", "make_tcn"])
+def test_beat_model_forward(factory):
+    model = getattr(ts, factory)()
+    assert isinstance(model, torch.nn.Module)
+    out = model(torch.zeros(4, 1, 200))                  # (batch, 1 channel, beat_len)
+    assert out.shape == (4,), "forward must return one logit per beat"
+    assert torch.isfinite(out).all()
+
+
+def test_train_cnn_learns_separable():
+    rng = np.random.default_rng(0)
+    n, L = 64, 32
+    ramp = np.linspace(-1.0, 1.0, L, dtype=np.float32)
+    X = np.zeros((2 * n, 1, L), dtype=np.float32)
+    X[:n, 0, :] = rng.normal(0, 0.1, (n, L)) + ramp      # class 0: rising
+    X[n:, 0, :] = rng.normal(0, 0.1, (n, L)) - ramp      # class 1: falling
+    y = np.array([0] * n + [1] * n)
+    p = ts.train_cnn(ts.make_beat_cnn, X, y, X, epochs=8, seed=0)
+    assert p.shape == (2 * n,)
+    assert p.min() >= 0.0 and p.max() <= 1.0
+    assert pr.evaluate_auroc(y, p) > 0.7                 # clearly learns this trivial split
+
+
+# ---------------------------------------------------------------------------
 # Pen-and-paper answers (submission.json, written by notebook.py)
 # ---------------------------------------------------------------------------
 import json  # noqa: E402
@@ -263,7 +380,7 @@ def submission():
     if not os.path.exists(SUBMISSION_PATH):
         pytest.fail(
             "submission.json not found -- open notebook.py in marimo, answer "
-            "the pen-and-paper widgets (Sections A and B), and run all cells."
+            "the pen-and-paper widgets (Sections A, B and C), and run all cells."
         )
     with open(SUBMISSION_PATH) as f:
         return json.load(f)
@@ -276,53 +393,94 @@ def _require(submission, key):
     return val
 
 
-# --- Section B: the 3x3 matrix C = [[3,7,4],[1,7,7],[4,3,2]] (worked by hand) ---
-def test_q_pp_greedy_total(submission):
+# --- Part 2: the 3x3 matrix C = [[3,7,4],[1,7,7],[4,3,2]] (worked by hand) ---
+def test_q_pp_c_greedy_total(submission):
     # greedy picks the diagonal: 3 + 7 + 2 = 12
-    assert _require(submission, "Q_PP_GREEDY_TOTAL") == 12
+    assert _require(submission, "Q_PP_C_GREEDY_TOTAL") == 12
 
 
-def test_q_pp_opt_total(submission):
+def test_q_pp_c_opt_total(submission):
     # optimal assignment {0:2, 1:0, 2:1}: 4 + 1 + 3 = 8
-    assert _require(submission, "Q_PP_OPT_TOTAL") == 8
+    assert _require(submission, "Q_PP_C_OPT_TOTAL") == 8
 
 
-def test_q_pp_strand(submission):
+def test_q_pp_c_strand(submission):
     # track 2 wants det 1 (cost 1) but greedy already took it for track 1
-    assert _require(submission, "Q_PP_STRAND") == "t2"
+    assert _require(submission, "Q_PP_C_STRAND") == "t2"
 
 
-def test_q_pp_lines(submission):
+def test_q_pp_c_lines(submission):
     # after row/col reduction, 2 lines cover all zeros (< 3 -> needs adjust)
-    assert _require(submission, "Q_PP_LINES") == 2
+    assert _require(submission, "Q_PP_C_LINES") == 2
 
 
-def test_q_pp_adjust(submission):
+def test_q_pp_c_adjust(submission):
     # smallest uncovered value in the adjust step is 1
-    assert _require(submission, "Q_PP_ADJUST") == 1
+    assert _require(submission, "Q_PP_C_ADJUST") == 1
 
 
-def test_q_pp_assign(submission):
+def test_q_pp_c_assign(submission):
     # optimal one-to-one assignment: track1->det3, track2->det1, track3->det2
-    assert _require(submission, "Q_PP_ASSIGN") == "a"
+    assert _require(submission, "Q_PP_C_ASSIGN") == "a"
 
 
-def test_q_pp_cross(submission):
+def test_q_pp_c_cross(submission):
     # after the crossing each cell is nearest the other's detection
-    assert _require(submission, "Q_PP_CROSS") == "a"
+    assert _require(submission, "Q_PP_C_CROSS") == "a"
 
 
-# --- Section A: sequence models (leak-free landmark task) ---
-def test_q_pp_a_leak(submission):
+# --- Part 1-B: sequence models (leak-free landmark task) ---
+def test_q_pp_b_leak(submission):
     # "ever died" leaks: last visit is near death, follow-up length encodes outcome.
-    assert _require(submission, "Q_PP_A_LEAK") == "b"
+    assert _require(submission, "Q_PP_B_LEAK") == "b"
 
 
-def test_q_pp_a_compare(submission):
+def test_q_pp_b_compare(submission):
     # leak-free, the three models are close (~0.88-0.92), within noise on ~55 events.
-    assert _require(submission, "Q_PP_A_COMPARE") == "a"
+    assert _require(submission, "Q_PP_B_COMPARE") == "a"
 
 
-def test_q_pp_a_size(submission):
+def test_q_pp_b_size(submission):
     # shrinking the RNN leaves AUROC about the same: capacity is not the bottleneck.
-    assert _require(submission, "Q_PP_A_SIZE") == "b"
+    assert _require(submission, "Q_PP_B_SIZE") == "b"
+
+
+def test_q_pp_a_ecg_split(submission):
+    # False: beats must be split by record/patient (GroupKFold), so fold sizes
+    # follow which records land where, not a fixed 80% of the beat count.
+    assert _require(submission, "Q_PP_A_ECG_SPLIT") == "false"
+
+
+def test_q_pp_b_attn_avg(submission):
+    # Patient 4: uniform attention -> representation = average of visits (mean baseline).
+    assert _require(submission, "Q_PP_B_ATTN_AVG") == "4"
+
+
+def test_q_pp_b_attn_recency(submission):
+    # Patient 1: every row's mass on the last visit -> recency / last-value.
+    assert _require(submission, "Q_PP_B_ATTN_RECENCY") == "1"
+
+
+def test_q_pp_b_attn_self(submission):
+    # Patient 2: diagonal -> each visit attends to itself, no context mixing.
+    assert _require(submission, "Q_PP_B_ATTN_SELF") == "2"
+
+
+def test_q_pp_b_attn_baseline(submission):
+    # Patient 3: every row's mass on the first visit -> anchored to baseline.
+    assert _require(submission, "Q_PP_B_ATTN_BASELINE") == "3"
+
+
+def test_q_pp_b_leakfree(submission):
+    # The trick: the honest team looks the most suspicious. Team A is leak-free:
+    # an external, separate cohort's stats use NO information from this test set
+    # (distribution shift, maybe, but not leakage). The innocent-sounding ones
+    # leak: Team B's outlier filter is computed over the whole dataset incl. test
+    # (test-dependent sample selection), Team C cherry-picks the best of 20 splits
+    # (optimistic selection), Team D's total visit count encodes follow-up length.
+    assert _require(submission, "Q_PP_B_LEAKFREE") == "a"
+
+
+def test_q_pp_eval(submission):
+    # Tick "yes" once the course teaching-evaluation form is in.
+    assert _require(submission, "Q_PP_EVAL") == "yes"

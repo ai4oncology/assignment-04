@@ -1,4 +1,4 @@
-"""Section A: predictive modelling -- leak-free landmark survival on the PBC cohort.
+"""Part 1 - B: predictive modelling -- leak-free landmark survival on the PBC cohort.
 
 Paired with the predictive-modelling beat of the assignment narrative:
 
@@ -33,7 +33,10 @@ leak-free landmark dataset described below.
 
 What to implement
 -----------------
-Eight auto-graded functions (see the stubs below). Keep the two models tiny:
+The auto-graded functions below: the landmark dataset + the three models +
+their training / evaluation, then next-visit forecasting, plus the leak-free
+cross-validation loops (`cross_val_auroc`, `groupkfold_mae`) and a `lag1_autocorr`
+diagnostic. Keep the two models tiny:
 the tests cap each at under 500 parameters, so use small `hidden` / `d_model`
 (the defaults are fine). On this cohort a 150-parameter RNN matches a much
 larger one, so bigger is not better here.
@@ -199,7 +202,7 @@ def evaluate_auroc(y_true, y_proba) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Section A (part 2): forecasting the next visit's labs (regression)
+# Part 1-B (continued): forecasting the next visit's labs (regression)
 # ---------------------------------------------------------------------------
 def load_forecasting(csv_path, max_len: int = 16):
     """Build a next-visit *forecasting* dataset (predict values, not an outcome).
@@ -235,4 +238,56 @@ def persistence_forecast(X, mask):
 def forecast_mae(Y_true, Y_pred) -> float:
     """Mean absolute error over all labs and examples (standardized units)."""
     # TODO: return float(np.mean(np.abs(Y_true - Y_pred))).
+    raise NotImplementedError
+
+
+# ---------------------------------------------------------------------------
+# Leak-free cross-validation + an autocorrelation diagnostic
+# ---------------------------------------------------------------------------
+def lag1_autocorr(frame, col) -> float:
+    """Lag-1 autocorrelation of a lab across consecutive visits of the same patient.
+
+    For each patient, pair every visit's value with that patient's *next* visit's
+    value (sorted by `day`), then return the Pearson correlation over all such
+    (prev, cur) pairs, as a float. Log-transform the right-skewed labs first (the
+    ones in `LOG_LABS`), matching `load_sequences`.
+
+    A high value is exactly why **persistence** ("next = last") is so hard to beat:
+    consecutive lab values barely move, so yesterday is an excellent guess for today.
+    """
+    # TODO: build per-patient (prev, cur) pairs sorted by day (use groupby().shift()),
+    # drop NaNs, and return float(np.corrcoef(prev, cur)[0, 1]).
+    raise NotImplementedError
+
+
+def cross_val_auroc(make, X, mask, y, n_splits: int = 5, epochs: int = 60, seed: int = 42):
+    """Stratified k-fold cross-validated AUROC for the landmark classifier.
+
+    Here each patient is **one row** (one sequence, one label), so a plain
+    `StratifiedKFold` already keeps a patient on a single side of the split: no
+    GroupKFold needed (contrast `groupkfold_mae`, where one patient yields many
+    rows). `make` is a zero-arg factory returning a *fresh* model per fold (so
+    folds do not share trained weights). For each fold: train on the train rows
+    with `train_model`, score the held-out rows with `evaluate_auroc` on
+    `predict_proba`. Return `(mean_auroc, std_auroc)` across folds, as floats.
+    """
+    # TODO: loop StratifiedKFold(n_splits, shuffle=True, random_state=seed).split(X, y);
+    # train a fresh make() per fold, collect held-out AUROC, return (mean, std).
+    raise NotImplementedError
+
+
+def groupkfold_mae(make, X, mask, Y, groups, n_splits: int = 5,
+                   epochs: int = 40, seed: int = 42) -> float:
+    """GroupKFold (keyed on patient id) cross-validated next-visit MAE.
+
+    Unlike the landmark task, one patient produces **many** (history, next-visit)
+    examples, so a random split would put the same patient in train and test and
+    leak. `GroupKFold(...).split(X, Y, groups)` with `groups` = patient id keeps
+    every example of a patient on one side. `make` returns a fresh forecaster
+    mapping `(X, mask) -> next-visit lab vector`. Per fold: train it (Adam +
+    `nn.MSELoss`, `epochs` steps, seed `seed`), then record the absolute error on
+    the held-out rows. Return the mean absolute error over all examples, as a float.
+    """
+    # TODO: for tr, te in GroupKFold(n_splits).split(X, Y, groups): train make() on
+    # the train rows, fill err[te] = |pred - Y[te]|; return float(err.mean()).
     raise NotImplementedError

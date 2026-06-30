@@ -1,4 +1,4 @@
-"""Section B: multi-object tracking (the longitudinal-modelling half of the assignment).
+"""Part 2: multi-object tracking.
 
 Paired with the longitudinal/tracking beat of the assignment narrative (Week-9
 lecture):
@@ -77,7 +77,7 @@ def frames_as_list(df: pd.DataFrame):
 
 
 # ===========================================================================
-# Part 1 -- one-step association
+# Step 1 -- one-step association
 # ===========================================================================
 
 
@@ -136,7 +136,7 @@ def hungarian(cost):
 
 
 # ===========================================================================
-# Part 2 -- chain one-step matches into tracks
+# Step 2 -- chain one-step matches into tracks
 # ===========================================================================
 
 
@@ -182,7 +182,7 @@ def count_id_switches(pred_labels, gt_labels) -> int:
 
 
 # ===========================================================================
-# Part 3 -- predict, then match (the crossing fix)
+# Step 3 -- predict, then match (the crossing fix)
 # ===========================================================================
 
 
