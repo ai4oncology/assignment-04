@@ -1478,16 +1478,17 @@ def _(mo):
     mo.md(r"""
     ### Attention puzzle: diagnose four patients' models
 
-    Imagine a **single-head** Transformer. Below are the attention matrices it
-    produced for **four patients** (rows = query visit, columns = the visit
-    attended to; each row sums to 1). Each visit's representation is the
-    **weighted average** of all visits, using its row of weights.
+    Imagine a **single-head** Transformer. Below is its attention for **four
+    patients**, drawn as a flow: each visit on the top row (the **query**) sends a
+    line down to the visit it attends to on the bottom row, and the line is thicker
+    the more weight it carries. Each visit's new representation is the **weighted
+    average** of the visits it points to.
 
-    The four patients had very different clinical courses, and the attention map
-    reflects what the model leaned on for each. Below are four short clinical
-    situations. Read each matrix, work out the pattern it implies, and match it to
-    the patient. Two patterns connect back to models you already built: the
-    logistic **mean-summary** baseline and **persistence**.
+    The four patients had very different clinical courses, and the flow reflects
+    what the model leaned on for each. Below are four short clinical situations.
+    Read each diagram, work out the pattern it implies, and match it to the patient.
+    Two patterns connect back to models you already built: the logistic
+    **mean-summary** baseline and **persistence**.
     """)
     return
 
@@ -1530,29 +1531,43 @@ def _(np, plt):
             ]
         ),
     }
-    _fig, _axes = plt.subplots(1, 4, figsize=(11.5, 3.1))
-    _lbl = ["v1", "v2", "v3", "v4"]
+    # Draw each map as an attention-FLOW diagram (BertViz style): query visits on
+    # the top row, the visits they attend to on the bottom row, joined by lines
+    # whose thickness/opacity is the attention weight. The four patterns then read
+    # as distinct shapes: fan-to-last (recency), fan-to-first (baseline), straight
+    # verticals (self), and a faint full mesh (uniform).
+    _fig, _axes = plt.subplots(1, 4, figsize=(12, 3.4))
+    _orange, _blue = "#C2410C", "#344A9A"
     for _ax, _pid in zip(_axes, _mats):
         _A = _mats[_pid]
-        _ax.imshow(_A, cmap="Oranges", vmin=0, vmax=1)
-        _ax.set_xticks(range(4))
-        _ax.set_yticks(range(4))
-        _ax.set_xticklabels(_lbl, fontsize=8)
-        _ax.set_yticklabels(_lbl, fontsize=8)
-        _ax.set_title(f"Patient {_pid}", fontsize=11)
-        for _r in range(4):
-            for _c in range(4):
-                _ax.text(
-                    _c,
-                    _r,
-                    f"{_A[_r, _c]:.2f}",
-                    ha="center",
-                    va="center",
-                    fontsize=6.5,
-                    color="white" if _A[_r, _c] > 0.5 else "black",
+        for _q in range(4):          # query (top)
+            for _k in range(4):      # key it attends to (bottom)
+                _w = float(_A[_q, _k])
+                if _w < 0.08:        # hide negligible weights to keep it clean
+                    continue
+                _ax.plot(
+                    [_q, _k], [1, 0],
+                    color=_orange, lw=0.5 + 6.0 * _w,
+                    alpha=min(1.0, 0.12 + 0.9 * _w),
+                    solid_capstyle="round", zorder=1,
                 )
-    _axes[0].set_ylabel("query visit", fontsize=8)
-    _fig.supxlabel("key (visit attended to)", fontsize=9)
+        for _y in (0, 1):            # the two rows of visit nodes
+            _ax.scatter(range(4), [_y] * 4, s=150, color="white",
+                        edgecolor=_blue, linewidths=1.5, zorder=3)
+            for _v in range(4):
+                _ax.text(_v, _y, f"v{_v + 1}", ha="center", va="center",
+                         fontsize=7.5, zorder=4)
+        _ax.set_title(f"Patient {_pid}", fontsize=11)
+        _ax.set_xlim(-0.5, 3.5)
+        _ax.set_ylim(-0.45, 1.45)
+        _ax.axis("off")
+    _axes[0].text(-0.7, 1, "query", ha="right", va="center", fontsize=7.5, color="0.4")
+    _axes[0].text(-0.7, 0, "attends to", ha="right", va="center", fontsize=7.5, color="0.4")
+    _fig.suptitle(
+        "Attention flow: each line runs from a visit (top, the query) to the visit "
+        "it attends to (bottom); thicker = more weight",
+        fontsize=9,
+    )
     _fig.tight_layout()
     _fig
     return
