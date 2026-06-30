@@ -176,7 +176,10 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(BLUE, GREY, RED, np, plt):
-    from matplotlib.patches import FancyBboxPatch as _FancyBboxPatch, FancyArrowPatch as _FancyArrowPatch
+    from matplotlib.patches import (
+        FancyBboxPatch as _FancyBboxPatch,
+        FancyArrowPatch as _FancyArrowPatch,
+    )
 
     _YEL = "#FFE863"
     fig_exc, (ax_path, ax_wave) = plt.subplots(1, 2, figsize=(11, 4.8))
@@ -366,14 +369,16 @@ def _(Path, mo, np):
         _rec_N, _rec_V = [], []  # which record each beat came from (for leak-free splits)
         for _rid in _records:
             _sig, _samp, _syms = mitbih_record(_rid)
-            _nv = np.isin(_syms, ["N", "V"])                 # keep only Normal / PVC beats
+            _nv = np.isin(_syms, ["N", "V"])  # keep only Normal / PVC beats
             # your beat extractor: z-scored windows around each R-peak
             _beats, _kept = _ts.extract_beats(_sig, _samp[_nv], BEAT_BEFORE, BEAT_AFTER)
             for _w, _sym in zip(_beats, _syms[_nv][_kept]):
                 if _sym == "N":
-                    beats_N.append(_w); _rec_N.append(_rid)
+                    beats_N.append(_w)
+                    _rec_N.append(_rid)
                 else:
-                    beats_V.append(_w); _rec_V.append(_rid)
+                    beats_V.append(_w)
+                    _rec_V.append(_rid)
 
         _rng_mb = np.random.default_rng(0)
         _n_keep = min(len(beats_N), 4 * len(beats_V))
@@ -474,8 +479,9 @@ def _(BLUE, GREY, MITBIH_FS, MITBIH_OK, RED, mitbih_record, mo, np, plt):
         ax_seg.set_title(
             "MIT-BIH record 119: 20-second ECG segment, lead II (MLII)", fontsize=10
         )
-        ax_seg.legend(fontsize=8, frameon=False, loc="upper left",
-                      bbox_to_anchor=(1.01, 1.0))
+        ax_seg.legend(
+            fontsize=8, frameon=False, loc="upper left", bbox_to_anchor=(1.01, 1.0)
+        )
 
         ax_zoom.plot(_t_zoom, _sig119[_zlo:_zhi], color=GREY, lw=1.2)
         for (_bs, _sym), _c, _lbl in zip(
@@ -489,8 +495,9 @@ def _(BLUE, GREY, MITBIH_FS, MITBIH_OK, RED, mitbih_record, mo, np, plt):
         ax_zoom.set_ylabel("mV")
         ax_zoom.set_xlabel("seconds")
         ax_zoom.set_title("Zoom: N → PVC → N  (dashed = R-peak annotation)", fontsize=10)
-        ax_zoom.legend(fontsize=8, frameon=False, loc="upper left",
-                       bbox_to_anchor=(1.01, 1.0))
+        ax_zoom.legend(
+            fontsize=8, frameon=False, loc="upper left", bbox_to_anchor=(1.01, 1.0)
+        )
         fig_raw.tight_layout(h_pad=1.0, rect=[0, 0, 0.84, 1])
         out_raw = fig_raw
     out_raw
@@ -701,10 +708,16 @@ def _(BLUE, MITBIH_OK, RED, X_ecg, mo, np, plt, rec_ecg, y_ecg):
                 _auc(y_ecg[_te], _lr.predict_proba(_sc.transform(F_ecg[_te]))[:, 1])
             )
             auc_ecg_cnn.append(
-                _auc(y_ecg[_te], _ts.train_cnn(_ts.make_beat_cnn, X_ecg[_tr], y_ecg[_tr], X_ecg[_te]))
+                _auc(
+                    y_ecg[_te],
+                    _ts.train_cnn(_ts.make_beat_cnn, X_ecg[_tr], y_ecg[_tr], X_ecg[_te]),
+                )
             )
             auc_ecg_tcn.append(
-                _auc(y_ecg[_te], _ts.train_cnn(_ts.make_tcn, X_ecg[_tr], y_ecg[_tr], X_ecg[_te]))
+                _auc(
+                    y_ecg[_te],
+                    _ts.train_cnn(_ts.make_tcn, X_ecg[_tr], y_ecg[_tr], X_ecg[_te]),
+                )
             )
 
         print(
@@ -789,7 +802,7 @@ def _(mo, submission_radio_default):
     q_pp_ecg_split = mo.ui.radio(
         options=_opts,
         label="(A1) True or False: an 80/20 split puts exactly 0.8 x 35610 = "
-              "28488 beats in train and the other 7122 in validation.",
+        "28488 beats in train and the other 7122 in validation.",
         value=submission_radio_default("Q_PP_A_ECG_SPLIT", _opts),
     )
     q_pp_ecg_split
@@ -828,14 +841,26 @@ def _(Path, np, plt):
     import pandas as pd
 
     PBC_BLUE, PBC_RED, PBC_GREEN, PBC_GREY = "#344A9A", "#C8323C", "#00A082", "#9AA0A6"
-    plt.rcParams.update({"font.size": 12, "figure.dpi": 120,
-                         "axes.spines.top": False, "axes.spines.right": False})
+    plt.rcParams.update(
+        {
+            "font.size": 12,
+            "figure.dpi": 120,
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+        }
+    )
 
     _DATA = Path(__file__).with_name("data") / "pbcseq.csv"
     LABS = ["bili", "albumin", "alk.phos", "ast", "platelet", "protime"]
     LOGLABS = {"bili", "alk.phos", "ast", "protime"}
-    PRETTY = {"bili": "bilirubin", "albumin": "albumin", "alk.phos": "alk. phos.",
-              "ast": "AST", "platelet": "platelets", "protime": "prothr. time"}
+    PRETTY = {
+        "bili": "bilirubin",
+        "albumin": "albumin",
+        "alk.phos": "alk. phos.",
+        "ast": "AST",
+        "platelet": "platelets",
+        "protime": "prothr. time",
+    }
 
     pbc_df = pd.read_csv(_DATA)
     pbc_df["yr"] = pbc_df["day"] / 365.25
@@ -850,8 +875,10 @@ def _(Path, np, plt):
         import longitudinal_exercise as _ll
     lag1_corr = _ll.lag1_autocorr
 
-    print(f"{pbc_df['id'].nunique()} patients, {len(pbc_df)} visits; "
-          f"visits/patient median {int(nvis.median())} (range {nvis.min()}-{nvis.max()})")
+    print(
+        f"{pbc_df['id'].nunique()} patients, {len(pbc_df)} visits; "
+        f"visits/patient median {int(nvis.median())} (range {nvis.min()}-{nvis.max()})"
+    )
     return (
         LABS,
         PBC_BLUE,
@@ -886,28 +913,82 @@ def _(PBC_BLUE, PBC_GREY, Path, plt):
     from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 
     _YEL = "#FFE863"
-    figx, (axx, axy) = plt.subplots(1, 2, figsize=(11.0, 4.8), gridspec_kw={"width_ratios": [1.15, 1]})
+    figx, (axx, axy) = plt.subplots(
+        1, 2, figsize=(11.0, 4.8), gridspec_kw={"width_ratios": [1.15, 1]}
+    )
     axx.axis("off")
     axx.imshow(plt.imread(Path(__file__).with_name("pbc.png")))
-    axx.text(0.0, 1.0, " MEDICAL EXCURSUS ", transform=axx.transAxes,
-             fontsize=8.5, fontweight="bold", color="black", va="bottom", ha="left",
-             bbox=dict(boxstyle="square,pad=0.25", facecolor=_YEL, edgecolor="none"), zorder=8)
-    axy.set_xlim(0, 5); axy.set_ylim(0, 5); axy.axis("off")
-    _steps = [("Small bile ducts destroyed", PBC_GREY), ("Bile cannot drain (cholestasis)", PBC_GREY),
-              ("Bilirubin builds up in the blood", PBC_BLUE),
-              ("Jaundice & itch;\nscarring $\\rightarrow$ cirrhosis over years", PBC_GREY)]
-    _ys = [4.3, 3.25, 2.2, 1.0]; _cx = 2.5
+    axx.text(
+        0.0,
+        1.0,
+        " MEDICAL EXCURSUS ",
+        transform=axx.transAxes,
+        fontsize=8.5,
+        fontweight="bold",
+        color="black",
+        va="bottom",
+        ha="left",
+        bbox=dict(boxstyle="square,pad=0.25", facecolor=_YEL, edgecolor="none"),
+        zorder=8,
+    )
+    axy.set_xlim(0, 5)
+    axy.set_ylim(0, 5)
+    axy.axis("off")
+    _steps = [
+        ("Small bile ducts destroyed", PBC_GREY),
+        ("Bile cannot drain (cholestasis)", PBC_GREY),
+        ("Bilirubin builds up in the blood", PBC_BLUE),
+        ("Jaundice & itch;\nscarring $\\rightarrow$ cirrhosis over years", PBC_GREY),
+    ]
+    _ys = [4.3, 3.25, 2.2, 1.0]
+    _cx = 2.5
     for (_txt, _fc), _y in zip(_steps, _ys):
         _h = 0.62 if "\n" in _txt else 0.5
-        axy.add_patch(FancyBboxPatch((_cx - 2.1, _y - _h / 2), 4.2, _h, boxstyle="round,pad=0.06",
-                      facecolor=_fc, edgecolor="none", alpha=.92 if _fc != PBC_GREY else .8, zorder=3))
-        axy.text(_cx, _y, _txt, ha="center", va="center", color="white",
-                 fontsize=9.5, fontweight=("bold" if _fc == PBC_BLUE else "normal"), zorder=4)
+        axy.add_patch(
+            FancyBboxPatch(
+                (_cx - 2.1, _y - _h / 2),
+                4.2,
+                _h,
+                boxstyle="round,pad=0.06",
+                facecolor=_fc,
+                edgecolor="none",
+                alpha=0.92 if _fc != PBC_GREY else 0.8,
+                zorder=3,
+            )
+        )
+        axy.text(
+            _cx,
+            _y,
+            _txt,
+            ha="center",
+            va="center",
+            color="white",
+            fontsize=9.5,
+            fontweight=("bold" if _fc == PBC_BLUE else "normal"),
+            zorder=4,
+        )
     for _y0, _y1 in zip(_ys[:-1], _ys[1:]):
-        axy.add_patch(FancyArrowPatch((_cx, _y0 - 0.30), (_cx, _y1 + 0.30), arrowstyle="-|>",
-                      mutation_scale=14, color="#555", lw=1.6, zorder=2))
-    axy.text(_cx, 0.32, "serum bilirubin is the marker tracked in pbcseq", ha="center",
-             va="center", fontsize=8.8, color=PBC_BLUE, fontstyle="italic")
+        axy.add_patch(
+            FancyArrowPatch(
+                (_cx, _y0 - 0.30),
+                (_cx, _y1 + 0.30),
+                arrowstyle="-|>",
+                mutation_scale=14,
+                color="#555",
+                lw=1.6,
+                zorder=2,
+            )
+        )
+    axy.text(
+        _cx,
+        0.32,
+        "serum bilirubin is the marker tracked in pbcseq",
+        ha="center",
+        va="center",
+        fontsize=8.8,
+        color=PBC_BLUE,
+        fontstyle="italic",
+    )
     axy.set_title("Why bilirubin rises along the trajectory", fontsize=11.5)
     figx.tight_layout()
     figx
@@ -936,19 +1017,38 @@ def _(PBC_BLUE, PBC_GREY, PBC_RED, pbc_df, plt):
     for _row, _pid in enumerate(sw_ids):
         _g = pbc_df[pbc_df.id == _pid].sort_values("yr")
         _t = _g["yr"].values * 12.0
-        axc.plot([0, _t.max()], [_row, _row], color=PBC_GREY, lw=0.8, alpha=.5, zorder=1)
+        axc.plot([0, _t.max()], [_row, _row], color=PBC_GREY, lw=0.8, alpha=0.5, zorder=1)
         axc.scatter(_t, [_row] * len(_t), s=16, color=PBC_BLUE, zorder=2)
         if (_g["status"] == 2).any():
             axc.scatter(_t.max(), _row, marker="X", s=55, color=PBC_RED, zorder=3)
         else:
-            axc.scatter(_t.max(), _row, marker="o", s=34, facecolors="none",
-                        edgecolors=PBC_GREY, linewidths=1.3, zorder=3)
-    axc.set_yticks([]); axc.set_xlabel("months since enrolment")
+            axc.scatter(
+                _t.max(),
+                _row,
+                marker="o",
+                s=34,
+                facecolors="none",
+                edgecolors=PBC_GREY,
+                linewidths=1.3,
+                zorder=3,
+            )
+    axc.set_yticks([])
+    axc.set_xlabel("months since enrolment")
     axc.set_ylabel(f"patients (sample of {len(sw_ids)}, sorted by follow-up)")
-    axc.set_title(f"The PBC cohort: {pbc_df['id'].nunique()} patients over ~{pbc_df['yr'].max() * 12:.0f} months")
+    axc.set_title(
+        f"The PBC cohort: {pbc_df['id'].nunique()} patients over ~{pbc_df['yr'].max() * 12:.0f} months"
+    )
     axc.scatter([], [], s=16, color=PBC_BLUE, label="visit (labs measured)")
     axc.scatter([], [], marker="X", s=55, color=PBC_RED, label="death")
-    axc.scatter([], [], marker="o", s=34, facecolors="none", edgecolors=PBC_GREY, label="censored / transplant")
+    axc.scatter(
+        [],
+        [],
+        marker="o",
+        s=34,
+        facecolors="none",
+        edgecolors=PBC_GREY,
+        label="censored / transplant",
+    )
     axc.legend(loc="lower right", fontsize=9, frameon=False)
     figc.tight_layout()
     figc
@@ -969,18 +1069,34 @@ def _(mo):
 @app.cell
 def _(PBC_BLUE, PBC_RED, nvis, pbc_df, plt):
     fig1, (ov1, ov2) = plt.subplots(1, 2, figsize=(10.4, 4.2))
-    ov1.hist(nvis.values, bins=range(1, 18), color=PBC_BLUE, alpha=.85, edgecolor="white")
+    ov1.hist(nvis.values, bins=range(1, 18), color=PBC_BLUE, alpha=0.85, edgecolor="white")
     ov1.axvline(nvis.median(), color=PBC_RED, lw=2, ls="--")
-    ov1.annotate(f"median {int(nvis.median())} visits", (nvis.median() + 0.4, ov1.get_ylim()[1] * 0.9),
-                 color=PBC_RED, fontsize=10)
-    ov1.set_xlabel("visits per patient"); ov1.set_ylabel("patients")
-    ov1.set_title(f"{pbc_df['id'].nunique()} patients, {len(pbc_df)} visits: repeated measures")
+    ov1.annotate(
+        f"median {int(nvis.median())} visits",
+        (nvis.median() + 0.4, ov1.get_ylim()[1] * 0.9),
+        color=PBC_RED,
+        fontsize=10,
+    )
+    ov1.set_xlabel("visits per patient")
+    ov1.set_ylabel("patients")
+    ov1.set_title(
+        f"{pbc_df['id'].nunique()} patients, {len(pbc_df)} visits: repeated measures"
+    )
     sample = pbc_df[pbc_df.groupby("id")["id"].transform("size") >= 4]
     for _pid, g in sample.groupby("id"):
         g = g.sort_values("yr")
-        ov2.plot(g["yr"], g["lb"], "-", color=(PBC_RED if g["died"].iloc[0] else PBC_BLUE), lw=0.7, alpha=.35)
-    ov2.set_xlabel("years since enrolment"); ov2.set_ylabel("log serum bilirubin")
-    ov2.set_title("One line per patient (red = later death)"); ov2.set_xlim(0, 12)
+        ov2.plot(
+            g["yr"],
+            g["lb"],
+            "-",
+            color=(PBC_RED if g["died"].iloc[0] else PBC_BLUE),
+            lw=0.7,
+            alpha=0.35,
+        )
+    ov2.set_xlabel("years since enrolment")
+    ov2.set_ylabel("log serum bilirubin")
+    ov2.set_title("One line per patient (red = later death)")
+    ov2.set_xlim(0, 12)
     fig1.tight_layout()
     fig1
     return
@@ -1005,25 +1121,51 @@ def _(LABS, PBC_BLUE, PBC_GREEN, PBC_GREY, PRETTY, lag1_corr, np, pbc_df, plt):
     rng = np.random.default_rng(0)
     sdf = pbc_df.dropna(subset=["lb"]).sort_values(["id", "day"])
     same = sdf.groupby("id")["lb"].diff().abs().dropna().values
-    vals = sdf["lb"].values; ids = sdf["id"].values
+    vals = sdf["lb"].values
+    ids = sdf["id"].values
     perm = rng.permutation(len(vals))
     cross = np.abs(vals - vals[perm])[ids != ids[perm]]
     acf = {lab: lag1_corr(pbc_df, lab) for lab in LABS}
     fig2, (ic1, ic2) = plt.subplots(1, 2, figsize=(10.4, 4.2))
     bins = np.linspace(0, 4, 30)
-    ic1.hist(same, bins=bins, density=True, color=PBC_GREEN, alpha=.8,
-             label=f"same patient (med {np.median(same):.2f})")
-    ic1.hist(cross, bins=bins, density=True, color=PBC_GREY, alpha=.55,
-             label=f"random pair (med {np.median(cross):.2f})")
-    ic1.set_xlabel(r"$|\Delta$ log-bilirubin$|$ between two visits"); ic1.set_ylabel("density")
+    ic1.hist(
+        same,
+        bins=bins,
+        density=True,
+        color=PBC_GREEN,
+        alpha=0.8,
+        label=f"same patient (med {np.median(same):.2f})",
+    )
+    ic1.hist(
+        cross,
+        bins=bins,
+        density=True,
+        color=PBC_GREY,
+        alpha=0.55,
+        label=f"random pair (med {np.median(cross):.2f})",
+    )
+    ic1.set_xlabel(r"$|\Delta$ log-bilirubin$|$ between two visits")
+    ic1.set_ylabel("density")
     ic1.set_title("Two visits of the SAME patient are far more alike")
     ic1.legend(fontsize=9, frameon=False)
     _order = sorted(acf, key=acf.get)
-    ic2.barh([PRETTY[lab] for lab in _order], [acf[lab] for lab in _order], color=PBC_BLUE, alpha=.85)
-    ic2.set_xlim(0, 1); ic2.set_xlabel("correlation between a visit and the next (same patient)")
+    ic2.barh(
+        [PRETTY[lab] for lab in _order],
+        [acf[lab] for lab in _order],
+        color=PBC_BLUE,
+        alpha=0.85,
+    )
+    ic2.set_xlim(0, 1)
+    ic2.set_xlabel("correlation between a visit and the next (same patient)")
     ic2.set_title("Consecutive visits are strongly correlated")
     for _i, lab in enumerate(_order):
-        ic2.annotate(f"{acf[lab]:.2f}", (acf[lab] + 0.02, _i), va="center", fontsize=9, color=PBC_BLUE)
+        ic2.annotate(
+            f"{acf[lab]:.2f}",
+            (acf[lab] + 0.02, _i),
+            va="center",
+            fontsize=9,
+            color=PBC_BLUE,
+        )
     fig2.tight_layout()
     fig2
     return
@@ -1048,13 +1190,17 @@ def _(PBC_BLUE, PBC_RED, np, nvis, pbc_df, plt):
     dts = pbc_df.sort_values(["id", "day"]).groupby("id")["yr"].diff().dropna().values
     died = pbc_df.groupby("id")["died"].first()
     fig3, (sp1, sp2) = plt.subplots(1, 2, figsize=(10.4, 4.2))
-    sp1.hist(dts, bins=np.linspace(0, 3, 40), color=PBC_BLUE, alpha=.85, edgecolor="white")
-    sp1.set_xlabel(r"gap between consecutive visits, $\Delta t$ (years)"); sp1.set_ylabel("visit pairs")
+    sp1.hist(dts, bins=np.linspace(0, 3, 40), color=PBC_BLUE, alpha=0.85, edgecolor="white")
+    sp1.set_xlabel(r"gap between consecutive visits, $\Delta t$ (years)")
+    sp1.set_ylabel("visit pairs")
     sp1.set_title(f"Spacing varies (median {np.median(dts):.2f} yr, not a grid)")
     parts = [nvis[died == 0].values, nvis[died == 1].values]
-    bp = sp2.boxplot(parts, tick_labels=["survived /\ncensored", "died"], patch_artist=True, widths=.6)
+    bp = sp2.boxplot(
+        parts, tick_labels=["survived /\ncensored", "died"], patch_artist=True, widths=0.6
+    )
     for patch, pcol in zip(bp["boxes"], [PBC_BLUE, PBC_RED]):
-        patch.set_facecolor(pcol); patch.set_alpha(.7)
+        patch.set_facecolor(pcol)
+        patch.set_alpha(0.7)
     for med in bp["medians"]:
         med.set_color("black")
     sp2.set_ylabel("visits per patient")
@@ -1075,6 +1221,7 @@ def _(Path):
     # back to the student stubs. You implement the TODOs in longitudinal_exercise.py.
     # reload so edits to the module are picked up without restarting the kernel.
     import importlib as _importlib
+
     try:
         import longitudinal_solution as pr
     except ModuleNotFoundError:
@@ -1159,7 +1306,9 @@ def _(X, mask, pr, y):
 
 
     auc_rnn, sd_rnn = pr.cross_val_auroc(lambda: pr.make_rnn(X.shape[2]), X, mask, y)
-    auc_tfm, sd_tfm = pr.cross_val_auroc(lambda: pr.make_transformer(X.shape[2]), X, mask, y)
+    auc_tfm, sd_tfm = pr.cross_val_auroc(
+        lambda: pr.make_transformer(X.shape[2]), X, mask, y
+    )
     print(f"RNN:         AUROC {auc_rnn:.3f} +/- {sd_rnn:.3f}")
     print(f"Transformer: AUROC {auc_tfm:.3f} +/- {sd_tfm:.3f}")
     return auc_rnn, auc_tfm
@@ -1213,10 +1362,14 @@ def _(Path, np, pr):
     import torch.nn as _nn
 
     Xf, maskf, Yf, gf = pr.load_forecasting(
-        str(Path(__file__).with_name("data") / "pbcseq.csv"))
+        str(Path(__file__).with_name("data") / "pbcseq.csv")
+    )
     print(f"forecast examples={len(Yf)}  patients={len(np.unique(gf))}")
-    print(f"persistence (next = last)  MAE: "
-          f"{pr.forecast_mae(Yf, pr.persistence_forecast(Xf, maskf)):.3f}")
+    print(
+        f"persistence (next = last)  MAE: "
+        f"{pr.forecast_mae(Yf, pr.persistence_forecast(Xf, maskf)):.3f}"
+    )
+
 
     # pre-given tiny forecasters: each outputs the next lab vector (dim = N_FEATURES)
     class _RNNForecast(_nn.Module):
@@ -1229,6 +1382,7 @@ def _(Path, np, pr):
             o, _ = self.g(x)
             i = m.sum(1).clamp(min=1).long() - 1
             return self.fc(o[_torch.arange(len(x)), i])
+
 
     class _TFMForecast(_nn.Module):
         def __init__(self, d, dm=8, nh=2, ff=16):
@@ -1244,10 +1398,14 @@ def _(Path, np, pr):
             return self.fc(h)
 
 
-    print(f"tiny RNN forecaster         MAE: "
-          f"{pr.groupkfold_mae(lambda: _RNNForecast(Xf.shape[2]), Xf, maskf, Yf, gf):.3f}")
-    print(f"tiny Transformer forecaster MAE: "
-          f"{pr.groupkfold_mae(lambda: _TFMForecast(Xf.shape[2]), Xf, maskf, Yf, gf):.3f}")
+    print(
+        f"tiny RNN forecaster         MAE: "
+        f"{pr.groupkfold_mae(lambda: _RNNForecast(Xf.shape[2]), Xf, maskf, Yf, gf):.3f}"
+    )
+    print(
+        f"tiny Transformer forecaster MAE: "
+        f"{pr.groupkfold_mae(lambda: _TFMForecast(Xf.shape[2]), Xf, maskf, Yf, gf):.3f}"
+    )
     print("(persistence is the one to beat)")
     return
 
@@ -1267,14 +1425,14 @@ def _(mo):
 def _(mo, submission_radio_default):
     _opts = {
         "It runs faster than using the whole record.": "a",
-        "\"Ever died\" leaks the future: the last visit sits right before death "
+        '"Ever died" leaks the future: the last visit sits right before death '
         "and follow-up length encodes the outcome, inflating every model.": "b",
         "The first two years already contain all of each patient's visits.": "c",
     }
     q_pp_a_leak = mo.ui.radio(
         options=_opts,
         label="(B1) Why describe a patient by their first 2 years and predict "
-              "death within 5 years, rather than whether they *ever* died?",
+        "death within 5 years, rather than whether they *ever* died?",
         value=submission_radio_default("Q_PP_B_LEAK", _opts),
     )
     q_pp_a_leak
@@ -1339,36 +1497,60 @@ def _(np, plt):
     # Four synthetic single-head attention matrices (rows = query, cols = key;
     # each row sums to 1). Archetypes are scrambled across the patient numbers.
     _mats = {
-        1: np.array([[0.10, 0.10, 0.15, 0.65],    # recency: every row -> last visit
-                     [0.12, 0.08, 0.15, 0.65],
-                     [0.08, 0.10, 0.17, 0.65],
-                     [0.05, 0.08, 0.12, 0.75]]),
-        2: np.array([[0.79, 0.07, 0.07, 0.07],    # self/diagonal: no context mixing
-                     [0.07, 0.79, 0.07, 0.07],
-                     [0.07, 0.07, 0.79, 0.07],
-                     [0.07, 0.07, 0.07, 0.79]]),
-        3: np.array([[0.70, 0.10, 0.10, 0.10],    # baseline: every row -> first visit
-                     [0.68, 0.12, 0.10, 0.10],
-                     [0.71, 0.09, 0.12, 0.08],
-                     [0.72, 0.10, 0.10, 0.08]]),
-        4: np.array([[0.24, 0.26, 0.25, 0.25],    # uniform: averaging
-                     [0.26, 0.24, 0.25, 0.25],
-                     [0.25, 0.25, 0.26, 0.24],
-                     [0.25, 0.25, 0.24, 0.26]]),
+        1: np.array(
+            [
+                [0.10, 0.10, 0.15, 0.65],  # recency: every row -> last visit
+                [0.12, 0.08, 0.15, 0.65],
+                [0.08, 0.10, 0.17, 0.65],
+                [0.05, 0.08, 0.12, 0.75],
+            ]
+        ),
+        2: np.array(
+            [
+                [0.79, 0.07, 0.07, 0.07],  # self/diagonal: no context mixing
+                [0.07, 0.79, 0.07, 0.07],
+                [0.07, 0.07, 0.79, 0.07],
+                [0.07, 0.07, 0.07, 0.79],
+            ]
+        ),
+        3: np.array(
+            [
+                [0.70, 0.10, 0.10, 0.10],  # baseline: every row -> first visit
+                [0.68, 0.12, 0.10, 0.10],
+                [0.71, 0.09, 0.12, 0.08],
+                [0.72, 0.10, 0.10, 0.08],
+            ]
+        ),
+        4: np.array(
+            [
+                [0.24, 0.26, 0.25, 0.25],  # uniform: averaging
+                [0.26, 0.24, 0.25, 0.25],
+                [0.25, 0.25, 0.26, 0.24],
+                [0.25, 0.25, 0.24, 0.26],
+            ]
+        ),
     }
     _fig, _axes = plt.subplots(1, 4, figsize=(11.5, 3.1))
     _lbl = ["v1", "v2", "v3", "v4"]
     for _ax, _pid in zip(_axes, _mats):
         _A = _mats[_pid]
         _ax.imshow(_A, cmap="Oranges", vmin=0, vmax=1)
-        _ax.set_xticks(range(4)); _ax.set_yticks(range(4))
-        _ax.set_xticklabels(_lbl, fontsize=8); _ax.set_yticklabels(_lbl, fontsize=8)
+        _ax.set_xticks(range(4))
+        _ax.set_yticks(range(4))
+        _ax.set_xticklabels(_lbl, fontsize=8)
+        _ax.set_yticklabels(_lbl, fontsize=8)
         _ax.set_title(f"Patient {_pid}", fontsize=11)
         for _r in range(4):
             for _c in range(4):
-                _ax.text(_c, _r, f"{_A[_r, _c]:.2f}", ha="center", va="center",
-                         fontsize=6.5,
-                         color="white" if _A[_r, _c] > 0.5 else "black")
+                _ax.text(
+                    _c,
+                    _r,
+                    f"{_A[_r, _c]:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=6.5,
+                    color="white" if _A[_r, _c] > 0.5 else "black",
+                )
     _axes[0].set_ylabel("query visit", fontsize=8)
     _fig.supxlabel("key (visit attended to)", fontsize=9)
     _fig.tight_layout()
@@ -1382,7 +1564,7 @@ def _(mo, submission_radio_default):
     q_pp_attn_avg = mo.ui.radio(
         options=_opts,
         label="(B4) A patient whose labs stay stable and unremarkable across "
-              "every visit, with no single visit standing out. Which patient?",
+        "every visit, with no single visit standing out. Which patient?",
         value=submission_radio_default("Q_PP_B_ATTN_AVG", _opts),
     )
     q_pp_attn_avg
@@ -1395,7 +1577,7 @@ def _(mo, submission_radio_default):
     q_pp_attn_recency = mo.ui.radio(
         options=_opts,
         label="(B5) A patient who was stable for years, then deteriorated "
-              "abruptly over the final visits. Whose attention map fits?",
+        "abruptly over the final visits. Whose attention map fits?",
         value=submission_radio_default("Q_PP_B_ATTN_RECENCY", _opts),
     )
     q_pp_attn_recency
@@ -1408,7 +1590,7 @@ def _(mo, submission_radio_default):
     q_pp_attn_self = mo.ui.radio(
         options=_opts,
         label="(B6) A patient seen for unrelated one-off problems each time, "
-              "with no connecting trajectory between visits. Which patient?",
+        "with no connecting trajectory between visits. Which patient?",
         value=submission_radio_default("Q_PP_B_ATTN_SELF", _opts),
     )
     q_pp_attn_self
@@ -1421,8 +1603,8 @@ def _(mo, submission_radio_default):
     q_pp_attn_baseline = mo.ui.radio(
         options=_opts,
         label="(B7) A patient with a dramatic abnormality at the very first "
-              "visit, a very high baseline bilirubin, that never recurred but "
-              "still defines their prognosis. Which patient?",
+        "visit, a very high baseline bilirubin, that never recurred but "
+        "still defines their prognosis. Which patient?",
         value=submission_radio_default("Q_PP_B_ATTN_BASELINE", _opts),
     )
     q_pp_attn_baseline
@@ -1450,10 +1632,8 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo, submission_radio_default):
     _opts = {
-        "Team A standardizes each lab using a separate, older cohort's "
-        "mean and SD.": "a",
-        "Team B drops patients whose labs are most extreme across the whole "
-        "dataset.": "b",
+        "Team A standardizes each lab using a separate, older cohort's mean and SD.": "a",
+        "Team B drops patients whose labs are most extreme across the whole dataset.": "b",
         "Team C reports the best AUROC out of 20 random patient-level splits.": "c",
         "Team D adds each patient's total number of visits as a feature.": "d",
     }
@@ -1485,17 +1665,17 @@ def _(mo):
     Your plan:
 
     - **A.** Treat one frame-to-frame step as an **assignment problem**:
-      build a cost matrix of distances, then solve it two ways:
-      **greedy nearest-neighbour** and the **Hungarian algorithm**. On a
-      clean step they agree.
+      build a cost matrix of distances, then solve it two ways —
+      **greedy nearest-neighbour** and the **Hungarian algorithm**. Do they
+      agree on a clean step?
     - **B.** A **dish bump**: between two frames the microscope stage gets
-      knocked and *every* detection jumps. Greedy strands a track and pays
-      a higher cost; **Hungarian** recovers the right identities.
+      knocked and *every* detection jumps. How do greedy and Hungarian cope
+      when the whole geometry shifts?
     - **C.** **Chain** one-step matches into full tracks and count
-      **identity switches**: greedy vs Hungarian.
-    - **D.** Identities also **break at a crossing**. **Predict-then-match**
-      (constant-velocity motion) carries them through the crossing: but
-      *not* through the bump. **No single cost wins everywhere.**
+      **identity switches** for each matcher.
+    - **D.** Identities can also break at a **crossing**. Add a
+      constant-velocity motion model — **predict, then match** — and see
+      which failures it fixes and which it doesn't.
 
     The cohort: **3 cells over 8 frames** in `data/detections.csv`. Two of
     them cross paths, and the dish gets bumped early on.
@@ -1509,6 +1689,7 @@ def _(Path):
     # back to the student stubs. You implement the TODOs in tracking_exercise.py.
     # reload so edits to the module are picked up without restarting the kernel.
     import importlib as _importlib
+
     try:
         import tracking_solution as trk
     except ModuleNotFoundError:
@@ -1614,7 +1795,8 @@ def _(mo):
       guarantee.
 
     Below we use the **real** frames 0 and 1 (ordered by identity so the
-    correct answer is the diagonal). On this clean step the two agree.
+    correct answer is the diagonal). On this clean step, do the two
+    methods pick the same matching?
     """)
     return
 
@@ -1644,20 +1826,17 @@ def _(clean_cost, clean_greedy, clean_hung, mo, np):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Part 2-B. The dish gets bumped (drift breaks greedy)
+    ## Part 2-B. The dish gets bumped
 
     Between frame 1 and frame 2 someone knocks the microscope stage, so
     **every detection jumps** by the same offset, and stays shifted from
     then on. The jump is large enough that, looking only at raw distance,
     one cell's new detection lands closer to a *different* cell's old spot.
 
-    Watch what greedy does on the **real** frames 1 → 2. Processing rows
-    top to bottom, an early row grabs a cheap-looking dot that truly
-    belongs to another track, and a later row is stranded with an
-    expensive scrap: the result is **wrong** (identities mislinked) *and*
-    **cost-suboptimal**. The **Hungarian** algorithm optimises the total
-    globally, and because a rigid shift preserves the relative geometry,
-    it recovers the correct identities.
+    Watch what greedy does on the **real** frames 1 → 2, processing rows
+    top to bottom: will it still grab the right partner? And can a solver
+    that optimises the *total* cost globally — the **Hungarian**
+    algorithm — do any better when the whole dish has shifted rigidly?
     """)
     return
 
@@ -1801,14 +1980,15 @@ def _(mo, sw_greedy, sw_hung):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Part 2-D. Predict, then match (and where it *doesn't* help)
+    ## Part 2-D. Predict, then match
 
     At a crossing the two cells are momentarily nearest the *wrong*
-    neighbour, so any position-only cost mislinks them. The fix:
+    neighbour, so any position-only cost mislinks them. A natural idea:
     **don't match on where a cell is, match on where it is going.** Each
     track carries a velocity; predict its next position
     (`pred = cur + (cur − prev)`) and match the *predictions* to the new
-    detections. This is the core idea behind SORT-style trackers.
+    detections. This is the core idea behind SORT-style trackers. Does it
+    carry identities through the crossing — and does it survive the bump?
 
     `predict_then_match` does one such step; `link_tracks_motion` chains
     it (bootstrapping the first step with a plain Hungarian position match).
@@ -1863,14 +2043,13 @@ def _(mo, sw_greedy, sw_hung, sw_motion):
     Predict-then-match sails through the **crossing**, but it *also* trips,
     at the **dish bump**: a constant-velocity model assumes smooth motion and
     cannot anticipate a sudden jump, so its prediction lands every cell off by
-    the same offset and the match breaks (just like greedy). That is not a bug
-    to hide: it is the price of a simple motion model.
+    the same offset and the match breaks (just like greedy).
+    This is an inherent limitation of a simple motion model.
 
     So the two failure modes need *different* fixes: global assignment
     (Hungarian) rescues the discontinuity, motion prediction rescues the
     crossing. Real trackers (e.g. SORT) combine **both**: a motion model to
-    build the cost *and* a global solver to assign it: plus gating/re-init to
-    catch the discontinuities neither handles alone."""
+    build the cost *and* a global solver to assign it."""
     )
     return
 
@@ -1881,8 +2060,7 @@ def _(mo):
     ### pen-and-paper: run the Hungarian algorithm by hand
 
     Work this **3×3** cost matrix (tracks = rows, detections = columns)
-    with pen and paper. It is a *fresh* matrix: not one from the lecture:
-    so you have to actually turn the crank.
+    with pen and paper.
 
     $$
     C \;=\;
@@ -2043,8 +2221,7 @@ def _(mo, submission_radio_default):
     _opts = {"Yes, I did": "yes"}
     q_pp_eval = mo.ui.radio(
         options=_opts,
-        label="Have you filled out the course teaching-evaluation form "
-              "on ILIAS?",
+        label="Have you filled out the course teaching-evaluation form on ILIAS?",
         value=submission_radio_default("Q_PP_EVAL", _opts),
     )
     q_pp_eval
